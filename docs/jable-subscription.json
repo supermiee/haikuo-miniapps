@@ -12,5 +12,19 @@
     "detail_find_rule": "",
     "preRule": "",
     "ua": "PC_UA"
+  },
+  {
+    "title": "MissAV",
+    "author": "OpenAI",
+    "version": 1,
+    "group": "开发测试",
+    "type": "video",
+    "url": "https://missav.live/cn",
+    "search_url": "https://missav.live/cn/search/**",
+    "find_rule": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=1');pages.renderHome();",
+    "searchFind": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=1');pages.renderList({url:MY_URL,title:'搜索',options:{search:true,keyword:''}});",
+    "detail_find_rule": "",
+    "preRule": "",
+    "ua": "PC_UA"
   }
 ]
