@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '9';
+    var MODULE_VERSION = '10';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -9,7 +9,7 @@
     function pages() { return remote(PUBLISH_BASE + 'missav_pages.js?v=' + MODULE_VERSION, PAGES_PATH); }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=9')[payload.method](payload.params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=10')[payload.method](payload.params); }
             catch (ignore) { $.require('hiker://files/rules/missav/missav_pages.js')[payload.method](payload.params); }
         }, { method: method, params: params || {} });
     }
@@ -53,7 +53,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=9');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
+            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=10');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
@@ -103,7 +103,8 @@
         var detail = c.parseDetail(page.html, page.url), result = [], facts = [];
         c.addHistory(detail);
         if (detail.releaseDate) facts.push('发行：' + detail.releaseDate); if (detail.duration) facts.push('时长：' + detail.duration); if (detail.code) facts.push('番号：' + detail.code);
-        result.push({ title: detail.title || item.title || '详情', img: detail.image || item.image || '', desc: facts.join('\n'), col_type: 'movie_1_vertical_pic_blur' });
+        /* MissAV detail covers are landscape. A vertical/blur card crops them into a poster. */
+        result.push({ title: detail.title || item.title || '详情', img: detail.image || item.image || '', desc: facts.join('\n'), col_type: 'movie_1', extra: { lineVisible: false } });
         if (detail.originalTitle && detail.originalTitle !== detail.title) result.push({ title: detail.originalTitle, col_type: 'text_1' });
         result.push({ title: detail.mediaUrl ? '播放' : '在网页中播放', url: detail.mediaUrl ? JSON.stringify({ urls: [detail.mediaUrl], names: ['默认线路'], headers: [{ Referer: page.url, 'User-Agent': c.config.userAgent }] }) : ('web://' + detail.url), col_type: 'text_center_1', extra: { lineVisible: false } });
         result.push({ title: c.isFavorite(detail.url) ? '取消收藏' : '收藏', url: emptyRule('toggleSaved', detail), col_type: 'text_center_1' });
