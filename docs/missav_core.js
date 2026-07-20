@@ -31,8 +31,11 @@
     }
     function isUsableHtml(html, marker) {
         if (!html || html.length < 300) return false;
-        if (/cloudflare|just a moment|captcha|access denied|enable javascript/i.test(html)) return false;
-        return !marker || String(html).indexOf(marker) >= 0;
+        /* MissAV may embed Cloudflare's passive JavaScript detector in otherwise complete pages.
+           A requested page marker (for example a thumbnail card) is stronger evidence than that script. */
+        if (marker && String(html).indexOf(marker) >= 0) return true;
+        if (/just a moment|verify you are human|captcha|access denied|enable javascript/i.test(html)) return false;
+        return !marker;
     }
     function diagnostic(entry) {
         try {
@@ -84,7 +87,8 @@
         var blocks = String(html || '').match(/<div\b[^>]*class=["'][^"']*\bthumbnail\b[^"']*["'][^>]*>[\s\S]*?<\/div>\s*<\/div>/ig) || [];
         var cards = [];
         for (var i = 0; i < blocks.length; i++) {
-            var block = blocks[i], href = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i.exec(block), image = /<img\b[^>]*(?:data-src|src)=["']([^"']+)["']/i.exec(block);
+            var block = blocks[i], href = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i.exec(block);
+            var image = /<img\b[^>]*data-src=["']([^"']+)["']/i.exec(block) || /<img\b[^>]*src=["']([^"']+)["']/i.exec(block);
             var title = /class=["'][^"']*text-secondary[^"']*["'][^>]*>([\s\S]*?)<\/a>/i.exec(block);
             var duration = />(\d{1,2}:\d{2}:\d{2})</.exec(block), badge = /absolute[^"']*bottom-1[^"']*left-1[^"']*[^>]*>([\s\S]*?)<\//i.exec(block);
             var url = absolute(href && href[1], baseUrl), name = text(title && title[1]);
