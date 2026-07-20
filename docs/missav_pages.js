@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '6';
+    var MODULE_VERSION = '7';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -9,7 +9,7 @@
     function pages() { return remote(PUBLISH_BASE + 'missav_pages.js?v=' + MODULE_VERSION, PAGES_PATH); }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=6')[payload.method](payload.params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=7')[payload.method](payload.params); }
             catch (ignore) { $.require('hiker://files/rules/missav/missav_pages.js')[payload.method](payload.params); }
         }, { method: method, params: params || {} });
     }
@@ -47,7 +47,7 @@
         var c = core(), source = c.config.source, modules = [
             { title: '最近更新', url: source + '/cn/new' }, { title: '新片发布', url: source + '/cn/release' }, { title: '本周热门', url: source + '/cn/weekly-hot' }
         ], result = [];
-        result.push({ title: '搜索 MissAV', desc: '输入番号、标题或女优', url: $('hiker://empty').input(function () { var value = String(input || '').trim(); if (value) return requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=6').routeSearch(value, {}); return 'toast://请输入关键词'; }), col_type: 'input' });
+        result.push({ title: '搜索 MissAV', desc: '输入番号、标题或女优', url: $('hiker://empty').input(function () { var value = String(input || '').trim(); if (value) return requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=7').routeSearch(value, {}); return 'toast://请输入关键词'; }), col_type: 'input' });
         result.push(scroll('类型目录', routeGenres(), false));
         result.push(scroll('女优目录', 'web://' + source + '/cn/actresses', false));
         result.push(scroll('收藏', emptyRule('renderSaved', {}), false));
@@ -96,7 +96,7 @@
         if (detail.releaseDate) facts.push('发行：' + detail.releaseDate); if (detail.duration) facts.push('时长：' + detail.duration); if (detail.code) facts.push('番号：' + detail.code);
         result.push({ title: detail.title || item.title || '详情', img: detail.image || item.image || '', desc: facts.join('\n'), col_type: 'movie_1_vertical_pic_blur' });
         if (detail.originalTitle && detail.originalTitle !== detail.title) result.push({ title: detail.originalTitle, col_type: 'text_1' });
-        result.push({ title: detail.mediaUrl ? '播放' : '在网页中播放', url: detail.mediaUrl || ('web://' + detail.url), col_type: 'text_center_1', extra: detail.mediaUrl ? { referer: c.config.source + '/', ua: c.config.userAgent } : {} });
+        result.push({ title: detail.mediaUrl ? '播放' : '在网页中播放', url: detail.mediaUrl ? JSON.stringify({ urls: [detail.mediaUrl], names: ['默认线路'], headers: [{ Referer: page.url, 'User-Agent': c.config.userAgent }] }) : ('web://' + detail.url), col_type: 'text_center_1', extra: { lineVisible: false } });
         result.push({ title: c.isFavorite(detail.url) ? '取消收藏' : '收藏', url: emptyRule('toggleSaved', detail), col_type: 'text_center_1' });
         linkButtons(result, '女优', detail.actors); linkButtons(result, '类型', detail.genres); linkButtons(result, '系列', detail.series); linkButtons(result, '发行商', detail.makers); linkButtons(result, '导演', detail.directors); linkButtons(result, '标籤', detail.labels);
         if (detail.recommendations.length) result = result.concat(section('猜你喜欢', detail.recommendations));
