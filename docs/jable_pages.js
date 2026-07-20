@@ -1,6 +1,6 @@
 /* Jable 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '17';
+    var MODULE_VERSION = '20';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/jable/jable_core.js';
     var PAGES_PATH = 'hiker://files/rules/jable/jable_pages.js';
@@ -14,28 +14,37 @@
     function core() { return remoteModule(CORE_URL, CORE_PATH); }
     function pages() { return remoteModule(PAGES_URL, PAGES_PATH); }
 
-    function queryValue(url, key) {
-        var match = new RegExp('[?&]' + key + '=([^&#\\]]*)', 'i').exec(String(url || ''));
-        return match ? match[1] : '';
+    function searchUrl(keyword, sort) {
+        var url = core().config.sources[0] + '/search/?q=' + encodeURIComponent(String(keyword || '').trim());
+        return sort && sort !== 'relevance' ? (url + '&sort_by=' + encodeURIComponent(sort)) : url;
     }
 
-    function isSearchUrl(url, title) {
-        return title === '搜索' || /\/search(?:\/|[?#]|$)/i.test(String(url || ''));
-    }
-
-    function searchSorts(url) {
-        var keyword = queryValue(url, 'q');
-        if (!keyword) return [];
-        var selected = queryValue(url, 'sort_by') || 'avg_videos_popularity';
+    function searchSorts(keyword, selected) {
         var options = [
-            { title: '名称排序', value: 'title' },
-            { title: '热度优先', value: 'avg_videos_popularity' },
-            { title: '最近更新', value: 'last_content_date' },
-            { title: '最多影片', value: 'total_videos' }
+            { title: '最高相關', value: 'relevance' },
+            { title: '近期最佳', value: 'post_date_and_popularity' },
+            { title: '最近更新', value: 'post_date' },
+            { title: '最多觀看', value: 'video_viewed' },
+            { title: '最高收藏', value: 'most_favourited' }
         ];
-        var root = core().config.sources[0] + '/search/?q=' + keyword;
         for (var i = 0; i < options.length; i++) {
-            options[i].url = root + '&sort_by=' + options[i].value;
+            options[i].url = searchUrl(keyword, options[i].value);
+            options[i].selected = options[i].value === selected;
+        }
+        return options;
+    }
+
+    function listSorts(kind, selected) {
+        if (kind !== 'hot') return [];
+        var base = core().config.sources[0] + '/hot/?sort_by=';
+        var options = [
+            { title: '所有时间', value: 'video_viewed' },
+            { title: '本月热门', value: 'video_viewed_month' },
+            { title: '本周热门', value: 'video_viewed_week' },
+            { title: '今日热门', value: 'video_viewed_today' }
+        ];
+        for (var i = 0; i < options.length; i++) {
+            options[i].url = base + options[i].value;
             options[i].selected = options[i].value === selected;
         }
         return options;
@@ -43,7 +52,7 @@
 
     function retry(url, title) {
         return $('hiker://empty').rule(function (params) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17').renderList(params); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderList(params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20').renderList(params); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderList(params); }
         }, { url: url, title: title || '重试' });
     }
 
@@ -65,13 +74,13 @@
         return path + 'fypage/' + (pair.length > 1 ? ('?' + pair.slice(1).join('?')) : '') + '[firstPage=' + firstPage + ']';
     }
 
-    function routeList(url, title) {
+    function routeList(url, title, listKind, selectedSort) {
         var pageSource = pagedSource(url);
         return $('hiker://empty#' + pageSource).rule(function (params) {
             var source = String(MY_URL || '').split('#')[1] || params.url;
             source = source.split('@rule=')[0];
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17').renderList({ url: source, title: params.title }); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderList({ url: source, title: params.title }); }
-        }, { url: url, title: title || '视频列表' });
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20').renderList({ url: source, title: params.title, listKind: params.listKind, selectedSort: params.selectedSort }); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderList({ url: source, title: params.title, listKind: params.listKind, selectedSort: params.selectedSort }); }
+        }, { url: url, title: title || '视频列表', listKind: listKind || '', selectedSort: selectedSort || '' });
     }
 
     function routeModels(url, title) {
@@ -79,20 +88,30 @@
         return $('hiker://empty#' + pageSource).rule(function (params) {
             var source = String(MY_URL || '').split('#')[1] || params.url;
             source = source.split('@rule=')[0];
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17').renderModels({ url: source, title: params.title }); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderModels({ url: source, title: params.title }); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20').renderModels({ url: source, title: params.title }); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderModels({ url: source, title: params.title }); }
         }, { url: url, title: title || '女优' });
     }
 
     function routeDetail(item) {
         return $('hiker://empty').rule(function (params) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17').renderDetail(params); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderDetail(params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20').renderDetail(params); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderDetail(params); }
         }, { url: item.url, title: item.title || '', image: item.image || '' });
     }
 
     function routePage(name, title) {
         return $('hiker://empty').rule(function (params) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17')[params.name](); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js')[params.name](); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20')[params.name](); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js')[params.name](); }
         }, { name: name, title: title || '' });
+    }
+
+    function routeSearch(keyword, sort) {
+        var sourceUrl = searchUrl(keyword, sort);
+        var pageSource = pagedSource(sourceUrl);
+        return $('hiker://empty#' + pageSource).rule(function (params) {
+            var source = String(MY_URL || '').split('#')[1] || params.url;
+            source = source.split('@rule=')[0];
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20').renderList({ url: source, title: '搜索结果', searchKeyword: params.keyword, searchSort: params.sort }); } catch (ignore) { $.require('hiker://files/rules/jable/jable_pages.js').renderList({ url: source, title: '搜索结果', searchKeyword: params.keyword, searchSort: params.sort }); }
+        }, { url: sourceUrl, keyword: keyword, sort: sort || 'relevance' });
     }
 
     function card(item) {
@@ -106,12 +125,16 @@
     }
 
     function searchCard(item) {
+        var metadata = [];
+        if (item.duration) metadata.push('时长 ' + item.duration);
+        if (item.views) metadata.push('观看 ' + item.views);
+        if (item.favorites) metadata.push('收藏 ' + item.favorites);
         return {
             title: item.title,
             pic_url: item.image || '',
-            desc: item.duration ? ('时长：' + item.duration) : '点击查看详情',
+            desc: metadata.length ? metadata.join('  ·  ') : '点击查看详情',
             url: routeDetail(item),
-            col_type: 'pic_2',
+            col_type: 'movie_2',
             extra: { lineVisible: false }
         };
     }
@@ -130,7 +153,7 @@
         var result = [];
         result.push({
             title: '搜索',
-            url: "input ? 'hiker://search?s=' + encodeURIComponent(input) + '&rule=' + encodeURIComponent('Jable') : 'toast://请输入关键词'",
+            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=20');}catch(ignore){pages=$.require('hiker://files/rules/jable/jable_pages.js');}return pages.routeSearch(input,'relevance');})() : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
@@ -144,7 +167,7 @@
         var fresh = app.getList(app.config.sources[0] + '/new-release/', '/videos/', 6);
         if (fresh.ok && fresh.items.length) section(result, '新片优先', fresh.items, routeList(app.config.sources[0] + '/new-release/', '新片优先'));
         var hot = app.getList(app.config.sources[0] + '/hot/?t=week', '/videos/', 6);
-        if (hot.ok && hot.items.length) section(result, '本周热门', hot.items, routeList(app.config.sources[0] + '/hot/?t=week', '本周热门'));
+        if (hot.ok && hot.items.length) section(result, '本周热门', hot.items, routeList(app.config.sources[0] + '/hot/?t=week', '本周热门', 'hot', 'video_viewed_week'));
         setHomeResult(result);
     }
 
@@ -157,23 +180,45 @@
         var pageNumber = 1;
         try { pageNumber = Number(MY_PAGE || 1); } catch (ignorePage) {}
         var result = [];
-        var searching = isSearchUrl(params.url, params.title);
+        var searching = !!params.searchKeyword;
         if (pageNumber <= 1) {
-            result.push({ title: params.title || '视频列表', col_type: 'long_text', extra: { textSize: 19, lineVisible: false } });
+            var heading = params.title || '视频列表';
+            if (searching) heading += '\n' + params.searchKeyword;
+            if (searching && data.total) heading += '\n' + data.total + ' 部影片';
+            result.push({ title: heading, col_type: 'long_text', extra: { textSize: 19, lineVisible: false } });
             if (searching) {
-                var sorts = searchSorts(params.url);
+                var sorts = searchSorts(params.searchKeyword, params.searchSort || 'relevance');
                 for (var s = 0; s < sorts.length; s++) {
                     result.push({
                         title: (sorts[s].selected ? '✓ ' : '') + sorts[s].title,
-                        url: routeList(sorts[s].url, '搜索'),
+                        url: routeSearch(params.searchKeyword, sorts[s].value),
                         col_type: 'scroll_button'
                     });
                 }
+            }
+            var pageSorts = listSorts(params.listKind, params.selectedSort);
+            for (var p = 0; p < pageSorts.length; p++) {
+                result.push({
+                    title: (pageSorts[p].selected ? '✓ ' : '') + pageSorts[p].title,
+                    url: routeList(pageSorts[p].url, params.title, params.listKind, pageSorts[p].value),
+                    col_type: 'scroll_button'
+                });
             }
         }
         if (!data.items.length) result.push({ title: '未解析到视频，可能页面结构已变化。', url: 'web://' + data.page.url, col_type: 'text_center_1' });
         for (var i = 0; i < data.items.length; i++) result.push(searching ? searchCard(data.items[i]) : card(data.items[i]));
         setResult(result);
+    }
+
+    function renderSearch(keyword, sort) {
+        var value = String(keyword || '').trim();
+        if (!value) { setResult([{ title: '请输入关键词', col_type: 'text_center_1' }]); return; }
+        renderList({
+            url: searchUrl(value, sort || 'relevance'),
+            title: '搜索结果',
+            searchKeyword: value,
+            searchSort: sort || 'relevance'
+        });
     }
 
     function renderDetail(params) {
@@ -198,7 +243,7 @@
         result.push({ title: detail.media ? '▶ 立即播放' : '打开原网页播放', url: detail.media ? JSON.stringify({ urls: [detail.media], names: ['默认线路'], headers: [{ Referer: page.url, 'User-Agent': app.config.userAgent }] }) : 'web://' + page.url, col_type: 'text_center_1', extra: { lineVisible: false } });
         result.push({ title: '收藏 / 取消收藏', url: $('hiker://empty').lazyRule(function (item) {
             var app;
-            try { app = requirejs('https://supermiee.github.io/haikuo-miniapps/jable_core.js?v=17'); } catch (ignore) { app = $.require('hiker://files/rules/jable/jable_core.js'); }
+            try { app = requirejs('https://supermiee.github.io/haikuo-miniapps/jable_core.js?v=20'); } catch (ignore) { app = $.require('hiker://files/rules/jable/jable_core.js'); }
             var added = app.toggleFavorite(item);
             return 'toast://' + (added ? '已收藏' : '已取消收藏');
         }, { title: detail.title || params.title, image: detail.image || params.image, url: params.url }), col_type: 'flex_button' });
@@ -291,7 +336,7 @@
             { title: '搜索历史', desc: app.listValue('searches', []).join(' · ') || '暂无', col_type: 'text_1' },
             { title: '查看诊断日志', url: routePage('renderDiagnostics', '诊断日志'), col_type: 'text_center_1' },
             { title: '清除缓存与本地数据', url: $('hiker://empty').lazyRule(function () {
-                try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_core.js?v=17').clearLocal(); } catch (ignore) { $.require('hiker://files/rules/jable/jable_core.js').clearLocal(); }
+                try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_core.js?v=20').clearLocal(); } catch (ignore) { $.require('hiker://files/rules/jable/jable_core.js').clearLocal(); }
                 return 'toast://已清除';
             }), col_type: 'text_center_1' }
         ]);
@@ -307,7 +352,7 @@
             result.push({
                 title: (item.id === selected ? '✓ ' : '') + item.title,
                 url: $('hiker://empty').lazyRule(function (languageId) {
-                    try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_core.js?v=17').setLanguage(languageId); } catch (ignore) { $.require('hiker://files/rules/jable/jable_core.js').setLanguage(languageId); }
+                    try { requirejs('https://supermiee.github.io/haikuo-miniapps/jable_core.js?v=20').setLanguage(languageId); } catch (ignore) { $.require('hiker://files/rules/jable/jable_core.js').setLanguage(languageId); }
                     refreshPage();
                     return 'toast://语言已切换';
                 }, item.id),
@@ -327,9 +372,11 @@
 
     var exported = {
         routeList: routeList,
+        routeSearch: routeSearch,
         routeDetail: routeDetail,
         renderHome: renderHome,
         renderList: renderList,
+        renderSearch: renderSearch,
         renderDetail: renderDetail,
         renderTaxonomy: renderTaxonomy,
         renderModels: renderModels,

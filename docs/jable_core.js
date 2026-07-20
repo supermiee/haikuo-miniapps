@@ -15,7 +15,7 @@
             { id: 'ja', title: '日本語', siteValue: 'jp' },
             { id: 'en', title: 'English', siteValue: 'en' }
         ],
-        limits: { home: 8, comments: 10, history: 200 }
+        limits: { home: 6, comments: 10, history: 200 }
     };
 
     function now() { return new Date().getTime(); }
@@ -209,9 +209,25 @@
             var image = absolute(attr(block, 'data-src') || attr(block, 'data-original') || attr(block, 'data-lazy-src') || attr(block, 'src'), baseUrl);
             var duration = '';
             try { duration = text(pdfh(block, 'span.label&&Text')); } catch (ignoreDuration) {}
-            result.push({ title: displayTitle(title, href), rawTitle: text(title), url: href, image: image, duration: duration });
+            var views = metric(block, /(?:fa-eye|icon-eye|video-views|views)/i);
+            var favorites = metric(block, /(?:fa-heart|icon-heart|video-likes|favorites|likes)/i);
+            result.push({ title: displayTitle(title, href), rawTitle: text(title), url: href, image: image, duration: duration, views: views, favorites: favorites });
         }
         return result;
+    }
+
+    function metric(block, marker) {
+        var source = String(block || '');
+        var found = marker.exec(source);
+        if (!found) return '';
+        var segment = source.slice(found.index, found.index + 240);
+        var value = /(?:>|\s)(\d[\d,\s]{0,20})(?:<|\s|$)/.exec(segment);
+        return value ? text(value[1]).replace(/\s+/g, '') : '';
+    }
+
+    function parseTotal(html) {
+        var found = /(\d[\d,\s]*)\s*(?:部影片|videos?)/i.exec(String(html || ''));
+        return found ? text(found[1]).replace(/\s+/g, '') : '';
     }
 
     function parsePagination(html, baseUrl) {
@@ -331,7 +347,7 @@
     function getList(url, marker, limit) {
         var page = fetchCached(url, { marker: marker || '/videos/' }, 300);
         if (!page.ok) return page;
-        return { ok: true, page: page, items: parseCards(page.html, page.url, limit), pagination: parsePagination(page.html, page.url) };
+        return { ok: true, page: page, items: parseCards(page.html, page.url, limit), total: parseTotal(page.html), pagination: parsePagination(page.html, page.url) };
     }
 
     function listValue(key, fallback) {
