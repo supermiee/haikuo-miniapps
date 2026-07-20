@@ -3,6 +3,8 @@
     var CONFIG = {
         version: '0.1.0',
         source: 'https://missav.live',
+        /* Public site domains observed in the site's own redirect script. */
+        sources: ['https://missav.live', 'https://missav.ws', 'https://missav888.com', 'https://missav123.com', 'https://missav01.com', 'https://thisav2.com'],
         locale: 'cn',
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         timeout: 12000,
@@ -24,6 +26,7 @@
         var host = /^https?:\/\/[^/]+/i.exec(String(baseUrl || CONFIG.source));
         return (host ? host[0] : CONFIG.source) + (url.charAt(0) === '/' ? url : '/' + url);
     }
+    function replaceHost(url, host) { return String(url || '').replace(/^https?:\/\/[^/]+/i, host); }
     function parseResponse(raw) {
         if (!raw) return null;
         try { var parsed = JSON.parse(raw); if (parsed && typeof parsed.body !== 'undefined') return parsed; } catch (ignore) {}
@@ -45,19 +48,23 @@
     }
     function request(url, options) {
         options = options || {};
-        var target = absolute(url, CONFIG.source), started = now();
-        try {
-            var raw = fetchPC(target, { headers: { 'User-Agent': CONFIG.userAgent, 'Referer': CONFIG.source + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true });
-            var response = parseResponse(raw), status = Number(response && response.statusCode || 0), body = response && response.body || '';
-            if ((status === 0 || (status >= 200 && status < 400)) && isUsableHtml(body, options.marker || '')) {
-                diagnostic({ event: 'request', ok: true, status: status || 200, ms: now() - started, url: target });
-                return { ok: true, html: body, url: target, status: status || 200 };
+        var target = absolute(url, CONFIG.source), started = now(), failures = [];
+        for (var i = 0; i < CONFIG.sources.length; i++) {
+            var candidate = replaceHost(target, CONFIG.sources[i]);
+            try {
+                var raw = fetchPC(candidate, { headers: { 'User-Agent': CONFIG.userAgent, 'Referer': CONFIG.sources[i] + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true });
+                var response = parseResponse(raw), status = Number(response && response.statusCode || 0), body = response && response.body || '';
+                if ((status === 0 || (status >= 200 && status < 400)) && isUsableHtml(body, options.marker || '')) {
+                    diagnostic({ event: 'request', ok: true, status: status || 200, ms: now() - started, url: candidate, source: CONFIG.sources[i] });
+                    return { ok: true, html: body, url: candidate, status: status || 200 };
+                }
+                failures.push({ source: CONFIG.sources[i], status: status, reason: 'content marker missing' });
+            } catch (error) {
+                failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) });
             }
-            throw new Error(status ? ('HTTP ' + status) : '需要网页验证');
-        } catch (error) {
-            diagnostic({ event: 'request', ok: false, ms: now() - started, url: target, error: String(error) });
-            return { ok: false, url: target, error: { code: 'NETWORK_OR_VERIFICATION', message: '站点不可用或需要在网页中完成人工验证' } };
         }
+        diagnostic({ event: 'request', ok: false, ms: now() - started, url: target, failures: failures });
+        return { ok: false, url: target, error: { code: 'NO_CONTENT_RESPONSE', message: '站点未返回可解析内容（已尝试公开备用域名）', failures: failures } };
     }
     function readCache(key, ttl) {
         try { var item = storage0.getMyVar(cacheKey(key)); return item && now() - item.savedAt < ttl * 1000 ? item.value : null; } catch (ignore) { return null; }

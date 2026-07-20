@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '4';
+    var MODULE_VERSION = '5';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -9,7 +9,7 @@
     function pages() { return remote(PUBLISH_BASE + 'missav_pages.js?v=' + MODULE_VERSION, PAGES_PATH); }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=4')[payload.method](payload.params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=5')[payload.method](payload.params); }
             catch (ignore) { $.require('hiker://files/rules/missav/missav_pages.js')[payload.method](payload.params); }
         }, { method: method, params: params || {} });
     }
@@ -47,7 +47,7 @@
         var c = core(), source = c.config.source, modules = [
             { title: '最近更新', url: source + '/cn/new' }, { title: '新片发布', url: source + '/cn/release' }, { title: '本周热门', url: source + '/cn/weekly-hot' }
         ], result = [];
-        result.push({ title: '搜索 MissAV', desc: '输入番号、标题或女优', url: $('hiker://empty').input(function () { var value = String(input || '').trim(); if (value) return requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=4').routeSearch(value, {}); return 'toast://请输入关键词'; }), col_type: 'input' });
+        result.push({ title: '搜索 MissAV', desc: '输入番号、标题或女优', url: $('hiker://empty').input(function () { var value = String(input || '').trim(); if (value) return requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=5').routeSearch(value, {}); return 'toast://请输入关键词'; }), col_type: 'input' });
         result.push(scroll('类型目录', routeGenres(), false));
         result.push(scroll('女优目录', 'web://' + source + '/cn/actresses', false));
         result.push(scroll('收藏', emptyRule('renderSaved', {}), false));
