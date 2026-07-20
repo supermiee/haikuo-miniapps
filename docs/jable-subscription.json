@@ -2,13 +2,13 @@
   {
     "title": "Jable",
     "author": "OpenAI",
-    "version": 16,
+    "version": 17,
     "group": "开发测试",
     "type": "video",
     "url": "https://jable.tv/latest-updates/",
     "search_url": "https://jable.tv/search/?q=**",
-    "find_rule": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=16');pages.renderHome();",
-    "searchFind": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=16');pages.renderList({url:MY_URL,title:'搜索'});",
+    "find_rule": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17');pages.renderHome();",
+    "searchFind": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/jable_pages.js?v=17');pages.renderList({url:MY_URL,title:'搜索'});",
     "detail_find_rule": "",
     "preRule": "",
     "ua": "PC_UA"
