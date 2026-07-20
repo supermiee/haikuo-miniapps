@@ -171,5 +171,7 @@
         for (var i = 0; i < list.length && next.length < CONFIG.limits.history; i++) if (list[i].url !== item.url) next.push(list[i]);
         return writeList('history', next);
     }
-    $.exports = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseDetail: parseDetail, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
+    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseDetail: parseDetail, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
+    if (typeof module !== 'undefined' && module.exports) module.exports = exported;
+    if (typeof $ !== 'undefined') $.exports = exported;
 })();
