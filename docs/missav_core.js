@@ -189,14 +189,17 @@
         return '';
     }
     function parseDetail(html, baseUrl) {
+        var chineseTitle = meta(html, 'og:title') || meta(html, 'twitter:title');
         return {
             url: baseUrl,
-            title: meta(html, 'og:title') || field(html, '标题'),
+            /* The /cn page exposes the localized title through og:title; keep the Japanese field separately. */
+            title: chineseTitle || field(html, '标题'),
             image: meta(html, 'og:image'),
+            description: meta(html, 'og:description'),
             releaseDate: field(html, '发行日期') || meta(html, 'og:video:release_date'),
             duration: duration(meta(html, 'og:video:duration')),
             code: field(html, '番号'), originalTitle: field(html, '标题'),
-            actors: fieldLinks(html, '女优', baseUrl), genres: fieldLinks(html, '类型', baseUrl),
+            actors: fieldLinks(html, '女优', baseUrl), maleActors: fieldLinks(html, '男优', baseUrl).concat(fieldLinks(html, '男優', baseUrl)), genres: fieldLinks(html, '类型', baseUrl),
             series: fieldLinks(html, '系列', baseUrl), makers: fieldLinks(html, '发行商', baseUrl),
             directors: fieldLinks(html, '导演', baseUrl), labels: fieldLinks(html, '标籤', baseUrl),
             mediaUrl: parseM3u8(html), directUrls: parseDirectUrls(html), recommendations: parseCards(html, baseUrl, 12)

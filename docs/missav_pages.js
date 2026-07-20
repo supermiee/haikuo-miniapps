@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '10';
+    var MODULE_VERSION = '11';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -9,7 +9,7 @@
     function pages() { return remote(PUBLISH_BASE + 'missav_pages.js?v=' + MODULE_VERSION, PAGES_PATH); }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=10')[payload.method](payload.params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=11')[payload.method](payload.params); }
             catch (ignore) { $.require('hiker://files/rules/missav/missav_pages.js')[payload.method](payload.params); }
         }, { method: method, params: params || {} });
     }
@@ -53,7 +53,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=10');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
+            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=11');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
@@ -97,6 +97,11 @@
         result.push({ title: title, col_type: 'text_1' });
         for (var i = 0; i < links.length; i++) result.push(scroll(links[i].title, routeList(links[i].url, links[i].title), false));
     }
+    function linkNames(links) {
+        var names = [];
+        for (var i = 0; links && i < links.length; i++) names.push(links[i].title);
+        return names.join('、');
+    }
     function renderDetail(item) {
         item = item || {}; var c = core(), page = c.fetchCached(item.url, { marker: 'og:title' }, 300);
         if (!page.ok) return setResult(failure(page.error, item.url));
@@ -105,10 +110,22 @@
         if (detail.releaseDate) facts.push('发行：' + detail.releaseDate); if (detail.duration) facts.push('时长：' + detail.duration); if (detail.code) facts.push('番号：' + detail.code);
         /* MissAV detail covers are landscape. A vertical/blur card crops them into a poster. */
         result.push({ title: detail.title || item.title || '详情', img: detail.image || item.image || '', desc: facts.join('\n'), col_type: 'movie_1', extra: { lineVisible: false } });
-        if (detail.originalTitle && detail.originalTitle !== detail.title) result.push({ title: detail.originalTitle, col_type: 'text_1' });
+        if (detail.description) result.push({ title: '简介\n' + detail.description, col_type: 'long_text', extra: { textSize: 15, lineVisible: false } });
+        var metadata = [];
+        if (detail.releaseDate) metadata.push('发行日期：' + detail.releaseDate);
+        if (detail.code) metadata.push('番号：' + detail.code);
+        if (detail.originalTitle) metadata.push('标题：' + detail.originalTitle);
+        if (detail.actors.length) metadata.push('女优：' + linkNames(detail.actors));
+        if (detail.maleActors.length) metadata.push('男优：' + linkNames(detail.maleActors));
+        if (detail.genres.length) metadata.push('类型：' + linkNames(detail.genres));
+        if (detail.series.length) metadata.push('系列：' + linkNames(detail.series));
+        if (detail.makers.length) metadata.push('发行商：' + linkNames(detail.makers));
+        if (detail.directors.length) metadata.push('导演：' + linkNames(detail.directors));
+        if (detail.labels.length) metadata.push('标籤：' + linkNames(detail.labels));
+        if (metadata.length) result.push({ title: metadata.join('\n'), col_type: 'long_text', extra: { textSize: 15, lineVisible: false } });
         result.push({ title: detail.mediaUrl ? '播放' : '在网页中播放', url: detail.mediaUrl ? JSON.stringify({ urls: [detail.mediaUrl], names: ['默认线路'], headers: [{ Referer: page.url, 'User-Agent': c.config.userAgent }] }) : ('web://' + detail.url), col_type: 'text_center_1', extra: { lineVisible: false } });
         result.push({ title: c.isFavorite(detail.url) ? '取消收藏' : '收藏', url: emptyRule('toggleSaved', detail), col_type: 'text_center_1' });
-        linkButtons(result, '女优', detail.actors); linkButtons(result, '类型', detail.genres); linkButtons(result, '系列', detail.series); linkButtons(result, '发行商', detail.makers); linkButtons(result, '导演', detail.directors); linkButtons(result, '标籤', detail.labels);
+        linkButtons(result, '女优', detail.actors); linkButtons(result, '男优', detail.maleActors); linkButtons(result, '类型', detail.genres); linkButtons(result, '系列', detail.series); linkButtons(result, '发行商', detail.makers); linkButtons(result, '导演', detail.directors); linkButtons(result, '标籤', detail.labels);
         if (detail.recommendations.length) result = result.concat(section('猜你喜欢', detail.recommendations));
         setResult(result);
     }
