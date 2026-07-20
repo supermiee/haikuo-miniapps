@@ -7,7 +7,7 @@
         sources: ['https://missav.live', 'https://missav.ws', 'https://missav888.com', 'https://missav123.com', 'https://missav01.com', 'https://thisav2.com'],
         locale: 'cn',
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
-        timeout: 12000,
+        timeout: 8000,
         cachePrefix: 'missav.full.',
         limits: { home: 6, history: 200 }
     };
@@ -27,6 +27,13 @@
         return (host ? host[0] : CONFIG.source) + (url.charAt(0) === '/' ? url : '/' + url);
     }
     function replaceHost(url, host) { return String(url || '').replace(/^https?:\/\/[^/]+/i, host); }
+    function activeSource() { try { return storage0.getMyVar(cacheKey('activeSource')) || ''; } catch (ignore) { return ''; } }
+    function sourceOrder() {
+        var active = activeSource(), order = [];
+        if (active && CONFIG.sources.indexOf(active) >= 0) order.push(active);
+        for (var i = 0; i < CONFIG.sources.length; i++) if (order.indexOf(CONFIG.sources[i]) < 0) order.push(CONFIG.sources[i]);
+        return order;
+    }
     function parseResponse(raw) {
         if (!raw) return null;
         try { var parsed = JSON.parse(raw); if (parsed && typeof parsed.body !== 'undefined') return parsed; } catch (ignore) {}
@@ -48,19 +55,20 @@
     }
     function request(url, options) {
         options = options || {};
-        var target = absolute(url, CONFIG.source), started = now(), failures = [];
-        for (var i = 0; i < CONFIG.sources.length; i++) {
-            var candidate = replaceHost(target, CONFIG.sources[i]);
+        var target = absolute(url, CONFIG.source), started = now(), failures = [], sources = sourceOrder();
+        for (var i = 0; i < sources.length; i++) {
+            var candidate = replaceHost(target, sources[i]);
             try {
-                var raw = fetchPC(candidate, { headers: { 'User-Agent': CONFIG.userAgent, 'Referer': CONFIG.sources[i] + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true });
+                var raw = fetchPC(candidate, { headers: { 'User-Agent': CONFIG.userAgent, 'Referer': sources[i] + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true });
                 var response = parseResponse(raw), status = Number(response && response.statusCode || 0), body = response && response.body || '';
                 if ((status === 0 || (status >= 200 && status < 400)) && isUsableHtml(body, options.marker || '')) {
-                    diagnostic({ event: 'request', ok: true, status: status || 200, ms: now() - started, url: candidate, source: CONFIG.sources[i] });
+                    try { storage0.putMyVar(cacheKey('activeSource'), sources[i]); } catch (ignore) {}
+                    diagnostic({ event: 'request', ok: true, status: status || 200, ms: now() - started, url: candidate, source: sources[i] });
                     return { ok: true, html: body, url: candidate, status: status || 200 };
                 }
-                failures.push({ source: CONFIG.sources[i], status: status, reason: 'content marker missing' });
+                failures.push({ source: sources[i], status: status, reason: 'content marker missing' });
             } catch (error) {
-                failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) });
+                failures.push({ source: sources[i], status: 0, reason: String(error) });
             }
         }
         diagnostic({ event: 'request', ok: false, ms: now() - started, url: target, failures: failures });
@@ -154,6 +162,32 @@
             return result;
         } catch (ignore) { return []; }
     }
+    function unpackPacker(script) {
+        var match = /eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\('([\s\S]*?)',\s*(\d+),\s*(\d+),\s*'([^']*)'\.split\('\|'\)/i.exec(String(script || ''));
+        if (!match) return '';
+        var packed = match[1], base = Number(match[2]), count = Number(match[3]), keys = match[4].split('|');
+        if (base <= 1 || base > 62 || count < 0 || count > 200000) return '';
+        function toBase(number) {
+            var digits = '0123456789abcdefghijklmnopqrstuvwxyz', value = '';
+            if (!number) return '0';
+            while (number) { value = digits.charAt(number % base) + value; number = Math.floor(number / base); }
+            return value;
+        }
+        var map = {};
+        for (var i = 0; i < count; i++) map[toBase(i)] = keys[i] || toBase(i);
+        return packed.replace(/\b(\w+)\b/g, function (all, key) { return map.hasOwnProperty(key) ? map[key] : key; });
+    }
+    function parseM3u8(html) {
+        var source = String(html || ''), literal = /(https?:\\?\/\\?\/[^'"\\\s<>]+?\.m3u8[^'"\\\s<>]*)/i.exec(source);
+        if (literal) return literal[1].replace(/\\\//g, '/');
+        var scripts = source.match(/<script\b[^>]*>[\s\S]*?<\/script>/ig) || [];
+        for (var i = 0; i < scripts.length; i++) {
+            if (scripts[i].indexOf('eval(function') < 0 || scripts[i].indexOf('m3u8') < 0) continue;
+            var unpacked = unpackPacker(scripts[i]), found = /(https?:\\?\/\\?\/[^'"\\\s;]+?\.m3u8[^'"\\\s;]*)/i.exec(unpacked);
+            if (found) return found[1].replace(/\\\//g, '/');
+        }
+        return '';
+    }
     function parseDetail(html, baseUrl) {
         return {
             url: baseUrl,
@@ -165,7 +199,7 @@
             actors: fieldLinks(html, '女优', baseUrl), genres: fieldLinks(html, '类型', baseUrl),
             series: fieldLinks(html, '系列', baseUrl), makers: fieldLinks(html, '发行商', baseUrl),
             directors: fieldLinks(html, '导演', baseUrl), labels: fieldLinks(html, '标籤', baseUrl),
-            directUrls: parseDirectUrls(html), recommendations: parseCards(html, baseUrl, 12)
+            mediaUrl: parseM3u8(html), directUrls: parseDirectUrls(html), recommendations: parseCards(html, baseUrl, 12)
         };
     }
     function readList(name) { try { return storage0.getMyVar(cacheKey(name)) || []; } catch (ignore) { return []; } }
