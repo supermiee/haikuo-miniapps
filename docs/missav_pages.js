@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '18';
+    var MODULE_VERSION = '19';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -15,9 +15,11 @@
                 /* MY_URL contains Hiker's fypage marker on later pages. Build a clean MissAV URL from MY_PAGE instead. */
                 var pageNumber = Number(MY_PAGE || 1);
                 if (!pageNumber || pageNumber < 1) pageNumber = 1;
-                args.url = addQuery(args.url || '', { page: pageNumber > 1 ? String(pageNumber) : '' });
+                /* Rule callbacks run in an isolated scope: keep URL composition self-contained. */
+                var baseUrl = String(args.url || '').replace(/([?&])page=[^&]*/i, '').replace('?&', '?').replace(/&&/g, '&').replace(/[?&]$/, '');
+                args.url = pageNumber > 1 ? baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 'page=' + pageNumber : baseUrl;
             }
-            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=18');
+            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=19');
             if (!module || typeof module[payload.method] !== 'function') throw new Error('MissAV 页面模块加载失败：' + payload.method);
             module[payload.method](args);
         }, { method: method, params: params || {}, paged: !!source });
@@ -65,7 +67,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=18').routeSearch(input,{}) : 'toast://请输入关键词'",
+            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=19').routeSearch(input,{}) : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
