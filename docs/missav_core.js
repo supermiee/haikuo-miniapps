@@ -1,7 +1,7 @@
 /* MissAV 完整版公共内核。部署到 hiker://files/rules/missav/ 后由 $.require() 引用。 */
 (function () {
     var CONFIG = {
-        version: '0.1.1',
+        version: '0.1.2',
         source: 'https://missav.live',
         /* Public site domains observed in the site's own redirect script. */
         sources: ['https://missav.live', 'https://missav.ai', 'https://missav.ws', 'https://missav123.com', 'https://missav.fans', 'https://missav.media', 'https://missav888.com', 'https://missav01.com', 'https://thisav2.com'],
@@ -215,7 +215,7 @@
         var packed = match[1], base = Number(match[2]), count = Number(match[3]), keys = match[4].split('|');
         if (base <= 1 || base > 62 || count < 0 || count > 200000) return '';
         function toBase(number) {
-            var digits = '0123456789abcdefghijklmnopqrstuvwxyz', value = '';
+            var digits = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', value = '';
             if (!number) return '0';
             while (number) { value = digits.charAt(number % base) + value; number = Math.floor(number / base); }
             return value;
@@ -224,17 +224,32 @@
         for (var i = 0; i < count; i++) map[toBase(i)] = keys[i] || toBase(i);
         return packed.replace(/\b(\w+)\b/g, function (all, key) { return map.hasOwnProperty(key) ? map[key] : key; });
     }
-    function parseM3u8(html) {
-        var source = String(html || ''), literal = /(https?:\\?\/\\?\/[^'"\\\s<>]+?\.m3u8[^'"\\\s<>]*)/i.exec(source);
-        if (literal) return literal[1].replace(/\\\//g, '/');
-        var scripts = source.match(/<script\b[^>]*>[\s\S]*?<\/script>/ig) || [];
-        for (var i = 0; i < scripts.length; i++) {
-            if (scripts[i].indexOf('eval(function') < 0 || scripts[i].indexOf('m3u8') < 0) continue;
-            var unpacked = unpackPacker(scripts[i]), found = /(https?:\\?\/\\?\/[^'"\\\s;]+?\.m3u8[^'"\\\s;]*)/i.exec(unpacked);
-            if (found) return found[1].replace(/\\\//g, '/');
+    function parseQualities(html) {
+        var source = String(html || ''), bodies = [source], scripts = source.match(/<script\b[^>]*>[\s\S]*?<\/script>/ig) || [], result = [], seen = {};
+        for (var i = 0; i < scripts.length; i++) if (scripts[i].indexOf('eval(function') >= 0 && scripts[i].indexOf('m3u8') >= 0) bodies.push(unpackPacker(scripts[i]));
+        function add(url, quality) {
+            url = String(url || '').replace(/\\\//g, '/').replace(/[),;]+$/, '');
+            if (!/^https?:\/\//i.test(url) || seen[url]) return;
+            seen[url] = true;
+            var number = Number(quality || 0), inferred = /(2160|1440|1080|720|540|480|360|240)p?/i.exec(url);
+            /* Player variable names can be stale/misleading (for example source720 -> /1080p/). */
+            if (inferred) number = Number(inferred[1]);
+            result.push({ url: url, quality: number ? number + 'p' : '自动', value: number });
         }
-        return '';
+        for (var j = 0; j < bodies.length; j++) {
+            var body = bodies[j], named = /(?:source|quality|video)[_-]?(2160|1440|1080|720|540|480|360|240)?\s*=\s*(["'])(https?:\\?\/\\?\/[^'"\\\s;]+?\.m3u8[^'"\\\s;]*)\2/ig, match;
+            while ((match = named.exec(body))) add(match[3], match[1]);
+            var urls = body.match(/https?:\\?\/\\?\/[^'"\\\s<>]+?\.m3u8[^'"\\\s<>]*/ig) || [];
+            for (var k = 0; k < urls.length; k++) {
+                var before = body.slice(Math.max(0, body.indexOf(urls[k]) - 80), body.indexOf(urls[k]));
+                var hinted = /(2160|1440|1080|720|540|480|360|240)p?/i.exec(before);
+                add(urls[k], hinted && hinted[1]);
+            }
+        }
+        result.sort(function (a, b) { return b.value - a.value; });
+        return result;
     }
+    function parseM3u8(html) { var streams = parseQualities(html); return streams.length ? streams[0].url : ''; }
     function parseDetail(html, baseUrl) {
         var chineseTitle = meta(html, 'og:title') || meta(html, 'twitter:title');
         return {
@@ -249,7 +264,7 @@
             actors: fieldLinks(html, '女优', baseUrl), maleActors: fieldLinks(html, '男优', baseUrl).concat(fieldLinks(html, '男優', baseUrl)), genres: fieldLinks(html, '类型', baseUrl),
             series: fieldLinks(html, '系列', baseUrl), makers: fieldLinks(html, '发行商', baseUrl),
             directors: fieldLinks(html, '导演', baseUrl), labels: fieldLinks(html, '标籤', baseUrl),
-            mediaUrl: parseM3u8(html), directUrls: parseDirectUrls(html), recommendations: parseCards(html, baseUrl, 12)
+            qualities: parseQualities(html), mediaUrl: parseM3u8(html), directUrls: parseDirectUrls(html), recommendations: parseCards(html, baseUrl, 12)
         };
     }
     function readList(name) { try { return storage0.getMyVar(cacheKey(name)) || []; } catch (ignore) { return []; } }
@@ -266,12 +281,27 @@
         for (var i = 0; i < list.length && next.length < CONFIG.limits.history; i++) if (list[i].url !== item.url) next.push(list[i]);
         return writeList('history', next);
     }
+    function getPlayQuality() { try { return storage0.getMyVar(cacheKey('playQuality')) || 'highest'; } catch (ignore) { return 'highest'; } }
+    function setPlayQuality(value) {
+        var allowed = ['highest', '1080', '720', '540', '480', '360'];
+        value = String(value || 'highest'); if (allowed.indexOf(value) < 0) value = 'highest';
+        try { storage0.putMyVar(cacheKey('playQuality'), value); } catch (ignore) {}
+        return value;
+    }
+    function selectStream(detail, preference) {
+        var streams = detail && detail.qualities || [], preferred = String(preference || getPlayQuality()), target = Number(preferred || 0);
+        if (!streams.length) return { url: detail && detail.mediaUrl || '', quality: '' };
+        if (!target) return streams[0];
+        for (var i = 0; i < streams.length; i++) if (streams[i].value === target) return streams[i];
+        for (var j = 0; j < streams.length; j++) if (streams[j].value && streams[j].value < target) return streams[j];
+        return streams[streams.length - 1];
+    }
     function playerHeaders(page) {
         var result = { Referer: page.url, Origin: origin(page.url), 'User-Agent': CONFIG.userAgent };
         if (page.cookie) result.Cookie = page.cookie;
         return result;
     }
-    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, fetchManyCached: fetchManyCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseDetail: parseDetail, playerHeaders: playerHeaders, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
+    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, fetchManyCached: fetchManyCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseQualities: parseQualities, parseDetail: parseDetail, playerHeaders: playerHeaders, getPlayQuality: getPlayQuality, setPlayQuality: setPlayQuality, selectStream: selectStream, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();
