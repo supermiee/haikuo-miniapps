@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '14';
+    var MODULE_VERSION = '15';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -10,10 +10,15 @@
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
             /* Empty-rule callbacks do not always expose requirejs. Use the supported module loader directly. */
-            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=14');
+            var args = payload.params || {};
+            if (payload.paged) {
+                var current = String(MY_URL || '').split('#')[1] || args.url || '';
+                args.url = current.split('@rule=')[0];
+            }
+            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=15');
             if (!module || typeof module[payload.method] !== 'function') throw new Error('MissAV 页面模块加载失败：' + payload.method);
-            module[payload.method](payload.params);
-        }, { method: method, params: params || {} });
+            module[payload.method](args);
+        }, { method: method, params: params || {}, paged: !!source });
     }
     function addQuery(url, values) {
         var pair = String(url || '').split('?'), path = pair.shift(), query = pair.join('?').split('&'), map = {}, output = [];
@@ -30,7 +35,8 @@
     function searchUrl(keyword, options) { return addQuery(core().config.source + '/cn/search/' + encodeURIComponent(String(keyword || '').trim()), options || {}); }
     function routeSearch(keyword, options) {
         /* Search pages use query parameters; do not embed the URL inside Hiker's fypage token. */
-        return emptyRule('renderList', { url: searchUrl(keyword, options), title: '搜索：' + keyword, options: { search: true, keyword: keyword, filter: options && options.filters || '', sort: options && options.sort || '' } });
+        var url = searchUrl(keyword, options);
+        return emptyRule('renderList', { url: url, title: '搜索：' + keyword, options: { search: true, keyword: keyword, filter: options && options.filters || '', sort: options && options.sort || '' } }, pagedSource(url));
     }
     function failure(error, url) {
         return [
@@ -56,7 +62,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=14').routeSearch(input,{}) : 'toast://请输入关键词'",
+            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=15').routeSearch(input,{}) : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
