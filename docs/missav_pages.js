@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '12';
+    var MODULE_VERSION = '13';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -9,8 +9,10 @@
     function pages() { return remote(PUBLISH_BASE + 'missav_pages.js?v=' + MODULE_VERSION, PAGES_PATH); }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=12')[payload.method](payload.params); }
-            catch (ignore) { $.require('hiker://files/rules/missav/missav_pages.js')[payload.method](payload.params); }
+            /* Empty-rule callbacks do not always expose requirejs. Use the supported module loader directly. */
+            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=13');
+            if (!module || typeof module[payload.method] !== 'function') throw new Error('MissAV 页面模块加载失败：' + payload.method);
+            module[payload.method](payload.params);
         }, { method: method, params: params || {} });
     }
     function addQuery(url, values) {
@@ -54,7 +56,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=12');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
+            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=13').routeSearch(input,{}) : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
