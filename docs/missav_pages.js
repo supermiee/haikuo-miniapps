@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '11';
+    var MODULE_VERSION = '12';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -9,7 +9,7 @@
     function pages() { return remote(PUBLISH_BASE + 'missav_pages.js?v=' + MODULE_VERSION, PAGES_PATH); }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=11')[payload.method](payload.params); }
+            try { requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=12')[payload.method](payload.params); }
             catch (ignore) { $.require('hiker://files/rules/missav/missav_pages.js')[payload.method](payload.params); }
         }, { method: method, params: params || {} });
     }
@@ -24,6 +24,7 @@
     function routeList(url, title, options) { return emptyRule('renderList', { url: url, title: title || '影片列表', options: options || {} }, pagedSource(url)); }
     function routeDetail(item) { return emptyRule('renderDetail', item); }
     function routeGenres(url, title) { return emptyRule('renderGenres', { url: url || core().config.source + '/cn/genres', title: title || '类型目录' }, pagedSource(url || core().config.source + '/cn/genres')); }
+    function routeActresses(url, title) { return emptyRule('renderActresses', { url: url || core().config.source + '/cn/actresses', title: title || '女优目录' }, pagedSource(url || core().config.source + '/cn/actresses')); }
     function searchUrl(keyword, options) { return addQuery(core().config.source + '/cn/search/' + encodeURIComponent(String(keyword || '').trim()), options || {}); }
     function routeSearch(keyword, options) {
         /* Search pages use query parameters; do not embed the URL inside Hiker's fypage token. */
@@ -53,12 +54,12 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=11');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
+            url: "input ? (function(){var pages;try{pages=requirejs('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=12');}catch(ignore){pages=$.require('hiker://files/rules/missav/missav_pages.js');}return pages.routeSearch(input,{});})() : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
         result.push(scroll('类型目录', routeGenres(), false));
-        result.push(scroll('女优目录', 'web://' + source + '/cn/actresses', false));
+        result.push(scroll('女优目录', routeActresses(), false));
         result.push(scroll('收藏', emptyRule('renderSaved', {}), false));
         result.push(scroll('历史', emptyRule('renderHistory', {}), false));
         for (var i = 0; i < modules.length; i++) {
@@ -92,6 +93,14 @@
         for (var i = 0; i < genres.length; i++) result.push({ title: genres[i].title, desc: genres[i].count || '', url: routeList(genres[i].url, genres[i].title), col_type: 'text_2' });
         setResult(result);
     }
+    function renderActresses(params) {
+        params = params || {}; var c = core(), url = params.url || c.config.source + '/cn/actresses', page = c.fetchCached(url, { marker: 'actresses' }, 600);
+        if (!page.ok) return setResult(failure(page.error, url));
+        var result = [{ title: params.title || '女优目录', col_type: 'text_1' }], actresses = c.parseActresses(page.html, page.url);
+        for (var i = 0; i < actresses.length; i++) result.push({ title: actresses[i].title, desc: actresses[i].count, url: routeList(actresses[i].url, actresses[i].title), col_type: 'text_2' });
+        if (!actresses.length) result.push({ title: '未解析到女优目录', url: 'web://' + page.url, col_type: 'text_center_1' });
+        setResult(result);
+    }
     function linkButtons(result, title, links) {
         if (!links || !links.length) return;
         result.push({ title: title, col_type: 'text_1' });
@@ -123,7 +132,7 @@
         if (detail.directors.length) metadata.push('导演：' + linkNames(detail.directors));
         if (detail.labels.length) metadata.push('标籤：' + linkNames(detail.labels));
         if (metadata.length) result.push({ title: metadata.join('\n'), col_type: 'long_text', extra: { textSize: 15, lineVisible: false } });
-        result.push({ title: detail.mediaUrl ? '播放' : '在网页中播放', url: detail.mediaUrl ? JSON.stringify({ urls: [detail.mediaUrl], names: ['默认线路'], headers: [{ Referer: page.url, 'User-Agent': c.config.userAgent }] }) : ('web://' + detail.url), col_type: 'text_center_1', extra: { lineVisible: false } });
+        result.push({ title: detail.mediaUrl ? '播放' : '在网页中播放', url: detail.mediaUrl ? JSON.stringify({ urls: [detail.mediaUrl], names: ['默认线路'], headers: [c.playerHeaders(page)] }) : ('web://' + detail.url), col_type: 'text_center_1', extra: { lineVisible: false } });
         result.push({ title: c.isFavorite(detail.url) ? '取消收藏' : '收藏', url: emptyRule('toggleSaved', detail), col_type: 'text_center_1' });
         linkButtons(result, '女优', detail.actors); linkButtons(result, '男优', detail.maleActors); linkButtons(result, '类型', detail.genres); linkButtons(result, '系列', detail.series); linkButtons(result, '发行商', detail.makers); linkButtons(result, '导演', detail.directors); linkButtons(result, '标籤', detail.labels);
         if (detail.recommendations.length) result = result.concat(section('猜你喜欢', detail.recommendations));
@@ -132,7 +141,7 @@
     function toggleSaved(item) { core().toggleFavorite(item); refreshPage(false); }
     function renderSaved() { var items = core().readList('favorites'), result = [{ title: '我的收藏', col_type: 'text_1' }]; for (var i = 0; i < items.length; i++) result.push(card(items[i])); if (!items.length) result.push({ title: '暂无收藏', col_type: 'text_center_1' }); setResult(result); }
     function renderHistory() { var items = core().readList('history'), result = [{ title: '观看历史', col_type: 'text_1' }]; for (var i = 0; i < items.length; i++) result.push(card(items[i])); if (!items.length) result.push({ title: '暂无历史', col_type: 'text_center_1' }); setResult(result); }
-    var exported = { renderHome: renderHome, renderList: renderList, renderGenres: renderGenres, renderDetail: renderDetail, renderSaved: renderSaved, renderHistory: renderHistory, toggleSaved: toggleSaved, routeSearch: routeSearch };
+    var exported = { renderHome: renderHome, renderList: renderList, renderGenres: renderGenres, renderActresses: renderActresses, renderDetail: renderDetail, renderSaved: renderSaved, renderHistory: renderHistory, toggleSaved: toggleSaved, routeSearch: routeSearch };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();

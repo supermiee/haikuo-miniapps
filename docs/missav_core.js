@@ -4,7 +4,7 @@
         version: '0.1.0',
         source: 'https://missav.live',
         /* Public site domains observed in the site's own redirect script. */
-        sources: ['https://missav.live', 'https://missav.ws', 'https://missav888.com', 'https://missav123.com', 'https://missav01.com', 'https://thisav2.com'],
+        sources: ['https://missav.ai', 'https://missav.ws', 'https://missav.live', 'https://missav123.com', 'https://missav.fans', 'https://missav.media', 'https://missav888.com', 'https://missav01.com', 'https://thisav2.com'],
         locale: 'cn',
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         timeout: 8000,
@@ -39,6 +39,16 @@
         try { var parsed = JSON.parse(raw); if (parsed && typeof parsed.body !== 'undefined') return parsed; } catch (ignore) {}
         return { body: String(raw), statusCode: 200, headers: {} };
     }
+    function cookieHeader(headers) {
+        headers = headers || {}; var values = headers['Set-Cookie'] || headers['set-cookie'] || [], cookies = [];
+        if (typeof values === 'string') values = [values];
+        for (var i = 0; i < values.length; i++) {
+            var value = String(values[i] || '').split(';')[0];
+            if (value) cookies.push(value);
+        }
+        return cookies.join('; ');
+    }
+    function origin(url) { var found = /^https?:\/\/[^/]+/i.exec(String(url || '')); return found ? found[0] : CONFIG.source; }
     function isUsableHtml(html, marker) {
         if (!html || html.length < 300) return false;
         /* MissAV may embed Cloudflare's passive JavaScript detector in otherwise complete pages.
@@ -64,7 +74,7 @@
                 if ((status === 0 || (status >= 200 && status < 400)) && isUsableHtml(body, options.marker || '')) {
                     try { storage0.putMyVar(cacheKey('activeSource'), sources[i]); } catch (ignore) {}
                     diagnostic({ event: 'request', ok: true, status: status || 200, ms: now() - started, url: candidate, source: sources[i] });
-                    return { ok: true, html: body, url: candidate, status: status || 200 };
+                    return { ok: true, html: body, url: candidate, status: status || 200, headers: response.headers || {}, cookie: cookieHeader(response.headers) };
                 }
                 failures.push({ source: sources[i], status: status, reason: 'content marker missing' });
             } catch (error) {
@@ -128,6 +138,15 @@
         for (var i = 0; i < anchors.length; i++) {
             var href = /href=["']([^"']+)["']/i.exec(anchors[i]), url = absolute(href && href[1], baseUrl), name = text(anchors[i]);
             if (url && name && !/\/genres\/?(?:\?|$)/i.test(url)) result.push({ url: url, title: name, count: '' });
+        }
+        return unique(result, 'url');
+    }
+    function parseActresses(html, baseUrl) {
+        var source = String(html || ''), anchors = source.match(/<a\b[^>]*href=["'][^"']*\/actresses\/[^"']+["'][^>]*>[\s\S]*?<\/a>/ig) || [], result = [];
+        for (var i = 0; i < anchors.length; i++) {
+            var href = /href=["']([^"']+)["']/i.exec(anchors[i]), url = absolute(href && href[1], baseUrl), title = text(anchors[i]);
+            var count = /(\d[\d,]*)\s*(?:条影片|videos?)/i.exec(text(anchors[i]));
+            if (url && title && !/\/actresses\/?(?:\?|$)/i.test(url) && !/ranking/i.test(url)) result.push({ url: url, title: title.replace(/\s*\d[\d,]*\s*(?:条影片|videos?).*$/i, '').trim(), count: count ? count[1].replace(/,/g, '') + ' 部影片' : '' });
         }
         return unique(result, 'url');
     }
@@ -219,7 +238,12 @@
         for (var i = 0; i < list.length && next.length < CONFIG.limits.history; i++) if (list[i].url !== item.url) next.push(list[i]);
         return writeList('history', next);
     }
-    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseDetail: parseDetail, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
+    function playerHeaders(page) {
+        var result = { Referer: page.url, Origin: origin(page.url), 'User-Agent': CONFIG.userAgent };
+        if (page.cookie) result.Cookie = page.cookie;
+        return result;
+    }
+    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseDetail: parseDetail, playerHeaders: playerHeaders, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();
