@@ -1,13 +1,13 @@
 /* MissAV 完整版公共内核。部署到 hiker://files/rules/missav/ 后由 $.require() 引用。 */
 (function () {
     var CONFIG = {
-        version: '0.1.0',
+        version: '0.1.1',
         source: 'https://missav.live',
         /* Public site domains observed in the site's own redirect script. */
-        sources: ['https://missav.ai', 'https://missav.ws', 'https://missav.live', 'https://missav123.com', 'https://missav.fans', 'https://missav.media', 'https://missav888.com', 'https://missav01.com', 'https://thisav2.com'],
+        sources: ['https://missav.live', 'https://missav.ai', 'https://missav.ws', 'https://missav123.com', 'https://missav.fans', 'https://missav.media', 'https://missav888.com', 'https://missav01.com', 'https://thisav2.com'],
         locale: 'cn',
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
-        timeout: 8000,
+        timeout: 5000,
         cachePrefix: 'missav.full.',
         limits: { home: 6, history: 200 }
     };
@@ -93,6 +93,34 @@
         var page = request(url, options);
         try { if (page.ok) storage0.putMyVar(cacheKey(key), { savedAt: now(), value: page }); } catch (ignore) {}
         return page;
+    }
+    /* Home has three independent feeds. Fetch cache misses concurrently on the last known-good mirror,
+       then use the normal mirror fallback only for the individual feeds that still fail. */
+    function fetchManyCached(urls, options, ttl) {
+        options = options || {}; ttl = ttl || 300;
+        var result = [], missing = [], source = sourceOrder()[0];
+        for (var i = 0; i < urls.length; i++) {
+            var cached = readCache('page.' + String(urls[i]), ttl);
+            if (cached) result[i] = cached;
+            else missing.push({ index: i, url: urls[i], candidate: replaceHost(absolute(urls[i], CONFIG.source), source) });
+        }
+        if (missing.length && typeof batchFetch === 'function') {
+            try {
+                var requests = [];
+                for (var j = 0; j < missing.length; j++) requests.push({ url: missing[j].candidate, options: { headers: { 'User-Agent': CONFIG.userAgent, 'Referer': source + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true } });
+                var responses = batchFetch(requests);
+                for (var k = 0; k < missing.length; k++) {
+                    var response = parseResponse(responses[k]), status = Number(response && response.statusCode || 0), body = response && response.body || '';
+                    if ((status === 0 || (status >= 200 && status < 400)) && isUsableHtml(body, options.marker || '')) {
+                        var page = { ok: true, html: body, url: missing[k].candidate, status: status || 200, headers: response.headers || {}, cookie: cookieHeader(response.headers) };
+                        result[missing[k].index] = page;
+                        try { storage0.putMyVar(cacheKey('page.' + String(missing[k].url)), { savedAt: now(), value: page }); storage0.putMyVar(cacheKey('activeSource'), source); } catch (ignore) {}
+                    }
+                }
+            } catch (ignoreBatch) {}
+        }
+        for (var n = 0; n < missing.length; n++) if (!result[missing[n].index]) result[missing[n].index] = fetchCached(missing[n].url, options, ttl);
+        return result;
     }
     function attr(html, name) {
         var match = new RegExp('\\s' + name + '\\s*=\\s*["\\\']([^"\\\']+)["\\\']', 'i').exec(String(html || ''));
@@ -243,7 +271,7 @@
         if (page.cookie) result.Cookie = page.cookie;
         return result;
     }
-    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseDetail: parseDetail, playerHeaders: playerHeaders, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
+    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, fetchManyCached: fetchManyCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseDetail: parseDetail, playerHeaders: playerHeaders, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();

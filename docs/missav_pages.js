@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '15';
+    var MODULE_VERSION = '16';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -15,7 +15,7 @@
                 var current = String(MY_URL || '').split('#')[1] || args.url || '';
                 args.url = current.split('@rule=')[0];
             }
-            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=15');
+            var module = $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=16');
             if (!module || typeof module[payload.method] !== 'function') throw new Error('MissAV 页面模块加载失败：' + payload.method);
             module[payload.method](args);
         }, { method: method, params: params || {}, paged: !!source });
@@ -62,7 +62,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=15').routeSearch(input,{}) : 'toast://请输入关键词'",
+            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/missav_pages.js?v=16').routeSearch(input,{}) : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
@@ -70,11 +70,14 @@
         result.push(scroll('女优目录', routeActresses(), false));
         result.push(scroll('收藏', emptyRule('renderSaved', {}), false));
         result.push(scroll('历史', emptyRule('renderHistory', {}), false));
-        for (var i = 0; i < modules.length; i++) {
-            var page = c.fetchCached(modules[i].url, { marker: 'thumbnail' }, 180), items = page.ok ? c.parseCards(page.html, page.url, c.config.limits.home) : [];
-            result = result.concat(section(modules[i].title, items, routeList(modules[i].url, modules[i].title)));
-            if (!page.ok) result.push({ title: '加载失败：' + modules[i].title, desc: (page.error && page.error.message || '未知错误') + '\n' + modules[i].url, url: 'web://' + modules[i].url, col_type: 'text_1' });
-            else if (!items.length) result.push({ title: '未解析到影片：' + modules[i].title, desc: '页面已获取，但影片卡片结构发生变化。', url: 'web://' + modules[i].url, col_type: 'text_1' });
+        var homeUrls = [];
+        for (var i = 0; i < modules.length; i++) homeUrls.push(modules[i].url);
+        var homePages = c.fetchManyCached(homeUrls, { marker: 'thumbnail', timeout: 5000 }, 300);
+        for (var j = 0; j < modules.length; j++) {
+            var page = homePages[j], items = page.ok ? c.parseCards(page.html, page.url, c.config.limits.home) : [];
+            result = result.concat(section(modules[j].title, items, routeList(modules[j].url, modules[j].title)));
+            if (!page.ok) result.push({ title: '加载失败：' + modules[j].title, desc: (page.error && page.error.message || '未知错误') + '\n' + modules[j].url, url: 'web://' + modules[j].url, col_type: 'text_1' });
+            else if (!items.length) result.push({ title: '未解析到影片：' + modules[j].title, desc: '页面已获取，但影片卡片结构发生变化。', url: 'web://' + modules[j].url, col_type: 'text_1' });
         }
         setHomeResult(result);
     }
