@@ -26,5 +26,19 @@
     "detail_find_rule": "",
     "preRule": "",
     "ua": "PC_UA"
+  },
+  {
+    "title": "Hanime1 MVP",
+    "author": "OpenAI",
+    "version": 1,
+    "group": "开发测试",
+    "type": "video",
+    "url": "https://hanime1.me/",
+    "search_url": "https://hanime1.me/search?query=**",
+    "find_rule": "js:var pages=$.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=1');pages.renderHome();",
+    "searchFind": "js:var pages=$.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=1');pages.renderList({url:MY_URL,title:'搜索'});",
+    "detail_find_rule": "",
+    "preRule": "",
+    "ua": "PC_UA"
   }
 ]
