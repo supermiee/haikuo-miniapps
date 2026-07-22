@@ -1,6 +1,6 @@
 /* Hanime1 页面层。JSON 入口只加载本模块。 */
 (function () {
-    var MODULE_VERSION = '2';
+    var MODULE_VERSION = '3';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
@@ -17,17 +17,18 @@
     function pagedSource(url) { return addQuery(url, { page: 'fypage' }) + '[firstPage=' + url + ']'; }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            var pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=2');
+            var pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=3');
             if (payload.method === 'renderList') payload.params.page = Number(MY_PAGE || 1);
             pages[payload.method](payload.params);
         }, { method: method, params: params || {} });
     }
     function routeList(url, title) { return emptyRule('renderList', { url: url, title: title || '影片列表' }, pagedSource(url)); }
     function routeDetail(item) { return emptyRule('renderDetail', item); }
+    function routeVerification() { return emptyRule('renderVerification', {}); }
     function routeSearch(keyword, sort) { return routeList(addQuery(core().config.sources[0] + '/search', { query: keyword, sort: sort || '最新上市' }), '搜索：' + keyword); }
     function card(item) { return { title: item.title, pic_url: item.image || '', desc: item.remark || '点击查看详情', url: routeDetail(item), col_type: 'movie_2' }; }
     function failure(error, url) {
-        return [{ title: error && error.message || '页面加载失败', desc: '该站点可能要求网页验证，海阔无法自动绕过。', col_type: 'text_center_1' }, { title: '在网页打开', url: 'web://' + url, col_type: 'text_center_1' }];
+        return [{ title: error && error.message || '页面加载失败', desc: '请使用“验证并同步”完成站点验证，再返回刷新。', col_type: 'text_center_1' }, { title: '验证并同步', url: routeVerification(), col_type: 'text_center_1' }, { title: '在网页打开', url: 'web://' + url, col_type: 'text_center_1' }];
     }
     function section(result, title, items, more) {
         if (!items.length) return;
@@ -38,7 +39,8 @@
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
         if (!page.ok) { setHomeResult(failure(page.error, url)); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=2').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=3').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        result.push({ title: '验证并同步', desc: c.verifiedCookie() ? '已检测到本次运行的验证状态；需要时可重新验证。' : '首次使用或显示不可用时，请先在此完成网页验证。', url: routeVerification(), col_type: 'scroll_button' });
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
         result.push({ title: '收藏', url: emptyRule('renderFavorites', {}), col_type: 'scroll_button' });
@@ -84,6 +86,32 @@
         if (detail.playlist.length > 1) section(result, '播放清单', detail.playlist);
         setResult(result);
     }
+    function verificationScript() {
+        return $.toString(function () {
+            (function () {
+                function syncCookie() {
+                    try {
+                        var cookie = fy_bridge_app.getCookie('');
+                        if (cookie && cookie.indexOf('cf_clearance=') >= 0) {
+                            fy_bridge_app.putVar('hanime1.webCookie', cookie);
+                            fy_bridge_app.setWebTitle('验证完成，可返回刷新小程序');
+                        }
+                    } catch (ignore) {}
+                }
+                syncCookie();
+                setInterval(syncCookie, 1000);
+            })();
+        });
+    }
+    function renderVerification() {
+        var c = core(), source = c.config.sources[0] + '/';
+        try { setPageTitle('验证并同步'); } catch (ignore) {}
+        setResult([
+            { title: '验证并同步', desc: '请在下方网页完成 Cloudflare 验证。检测到 cf_clearance 后会仅在本次海阔运行中同步给小程序请求；退出海阔后自动失效。', col_type: 'long_text', extra: { textSize: 16, lineVisible: false } },
+            { title: 'Hanime1 网页验证', url: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.userAgent, referer: source, canBack: true, js: verificationScript() } },
+            { title: '验证完成后返回并刷新', url: $('hiker://empty').lazyRule(function () { back(true); return 'toast://已返回主页，请刷新'; }), col_type: 'text_center_1' }
+        ]);
+    }
     function toggleFavorite(item) { var added = core().toggleFavorite(item); refreshPage(false); return 'toast://' + (added ? '已收藏' : '已取消收藏'); }
     function renderFavorites() { renderLocal('favorites', '我的收藏'); }
     function renderHistory() { renderLocal('history', '观看历史'); }
@@ -92,7 +120,7 @@
         for (var i = 0; i < items.length; i++) result.push(card(items[i]));
         if (!items.length) result.push({ title: '暂无内容', col_type: 'text_center_1' }); setResult(result);
     }
-    var exported = { routeSearch: routeSearch, renderHome: renderHome, renderList: renderList, renderDetail: renderDetail, toggleFavorite: toggleFavorite, renderFavorites: renderFavorites, renderHistory: renderHistory };
+    var exported = { routeSearch: routeSearch, renderHome: renderHome, renderList: renderList, renderDetail: renderDetail, renderVerification: renderVerification, toggleFavorite: toggleFavorite, renderFavorites: renderFavorites, renderHistory: renderHistory };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();

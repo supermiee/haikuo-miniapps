@@ -1,7 +1,7 @@
 /* Hanime1 公共内核：请求、解析、缓存与播放地址处理。 */
 (function () {
     var CONFIG = {
-        version: '2',
+        version: '3',
         sources: ['https://hanime1.me'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         timeout: 12000,
@@ -47,6 +47,9 @@
         }
         return output.join('; ');
     }
+    function verifiedCookie() {
+        try { return String(getVar(CONFIG.cachePrefix + 'webCookie', '') || ''); } catch (ignore) { return ''; }
+    }
     function usable(html, marker) {
         if (!html || html.length < 300) return false;
         if (/just a moment|cf-chl|challenges\.cloudflare\.com|enable javascript and cookies/i.test(html)) return false;
@@ -73,7 +76,9 @@
         for (var i = 0; i < CONFIG.sources.length; i++) {
             var target = replaceHost(url, CONFIG.sources[i]);
             try {
-                var raw = fetchPC(target, { headers: { 'User-Agent': CONFIG.userAgent, Referer: CONFIG.sources[i] + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true, withHeaders: true });
+                var headers = { 'User-Agent': CONFIG.userAgent, Referer: CONFIG.sources[i] + '/' }, cookie = verifiedCookie();
+                if (cookie) headers.Cookie = cookie;
+                var raw = fetchPC(target, { headers: headers, timeout: options.timeout || CONFIG.timeout, withStatusCode: true, withHeaders: true });
                 var page = response(raw), html = page.body || '', status = Number(page.statusCode || 0);
                 if ((status === 0 || status < 400) && usable(html, options.marker)) {
                     return { ok: true, url: target, html: html, cookie: responseCookie(page.headers), status: status || 200 };
@@ -188,7 +193,7 @@
     }
     function playerHeaders(page) { var headers = { Referer: page.url, Origin: origin(page.url), 'User-Agent': CONFIG.userAgent }; if (page.cookie) headers.Cookie = page.cookie; return headers; }
 
-    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseNav: parseNav, parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite, addHistory: addHistory };
+    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseNav: parseNav, parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite, addHistory: addHistory, verifiedCookie: verifiedCookie };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();
