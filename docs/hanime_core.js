@@ -1,7 +1,7 @@
 /* Hanime1 公共内核：请求、解析、缓存与播放地址处理。 */
 (function () {
     var CONFIG = {
-        version: '1',
+        version: '2',
         sources: ['https://hanime1.me'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         timeout: 12000,
@@ -53,6 +53,20 @@
         return !marker || String(html).indexOf(marker) >= 0;
     }
     function replaceHost(url, host) { return String(url || '').replace(/^https?:\/\/[^/]+/i, host); }
+    function requestByWebView(url, options) {
+        if (typeof fetchCodeByWebView === 'undefined') return null;
+        try {
+            var html = fetchCodeByWebView(url, {
+                headers: { 'User-Agent': CONFIG.userAgent, Referer: origin(url) + '/' },
+                timeout: (options && options.webViewTimeout) || 30000,
+                checkJs: $.toString(function () {
+                    return document.querySelector('a[href*="/watch?v="], a[href*="/watch/"], meta[property="og:title"]');
+                })
+            });
+            if (usable(html, options && options.marker)) return { ok: true, url: url, html: html, cookie: '', status: 200, via: 'webview' };
+        } catch (error) { return { error: String(error) }; }
+        return null;
+    }
     function request(url, options) {
         options = options || {};
         var failures = [];
@@ -67,6 +81,10 @@
                 failures.push({ source: CONFIG.sources[i], status: status, reason: /cloudflare|just a moment/i.test(html) ? 'Cloudflare verification' : 'unexpected page structure' });
             } catch (error) { failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) }); }
         }
+        /* WebView executes the public page's JavaScript. It is a fallback for a verified user session, not a challenge bypass. */
+        var webView = requestByWebView(url, options);
+        if (webView && webView.ok) return webView;
+        if (webView && webView.error) failures.push({ source: 'webview', status: 0, reason: webView.error });
         return { ok: false, url: url, error: { code: 'NETWORK_OR_VERIFICATION', message: '站点不可用或需要在网页完成验证', failures: failures } };
     }
     function cacheKey(key) { return CONFIG.cachePrefix + key; }

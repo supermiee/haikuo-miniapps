@@ -1,6 +1,6 @@
 /* Hanime1 页面层。JSON 入口只加载本模块。 */
 (function () {
-    var MODULE_VERSION = '1';
+    var MODULE_VERSION = '2';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
@@ -17,7 +17,7 @@
     function pagedSource(url) { return addQuery(url, { page: 'fypage' }) + '[firstPage=' + url + ']'; }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            var pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=1');
+            var pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=2');
             if (payload.method === 'renderList') payload.params.page = Number(MY_PAGE || 1);
             pages[payload.method](payload.params);
         }, { method: method, params: params || {} });
@@ -38,7 +38,7 @@
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
         if (!page.ok) { setHomeResult(failure(page.error, url)); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=1').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=2').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
         result.push({ title: '收藏', url: emptyRule('renderFavorites', {}), col_type: 'scroll_button' });
@@ -59,7 +59,7 @@
         setResult(result);
     }
     function renderDetail(item) {
-        item = item || {}; var c = core(), page = c.fetchCached(item.url, { marker: '/watch' }, 300);
+        item = item || {}; var c = core(), page = c.fetchCached(item.url, { marker: 'og:title' }, 300);
         if (!page.ok) { setResult(failure(page.error, item.url)); return; }
         var detail = c.parseDetail(page); c.addHistory({ url: detail.url, title: detail.title || item.title, image: detail.image || item.image });
         try { setPageTitle(detail.title || item.title || '视频详情'); } catch (ignore) {}
