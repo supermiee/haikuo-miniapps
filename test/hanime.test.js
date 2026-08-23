@@ -279,5 +279,50 @@ test('订阅 JSON 版本与 ?v= 字面量全量一致（三个应用）', functi
     });
 });
 
+test('验证页使用移动端 UA 并提供手动导入', function () {
+    store = {};
+    pages.renderVerification();
+    var webviewCard = lastResult.filter(function (c) { return c.col_type === 'x5_webview_single'; })[0];
+    assert.ok(webviewCard, '缺内嵌网页卡片');
+    assert.strictEqual(webviewCard.extra.ua, core.config.mobileUa, '内嵌网页未使用移动端 UA');
+    assert.ok(webviewCard.extra.ua.indexOf('Android') > 0 && webviewCard.extra.ua.indexOf('Windows') < 0, 'UA 指纹不是移动端');
+    assert.ok(/cf_clearance/.test(webviewCard.extra.js) && /navigator\.userAgent/.test(webviewCard.extra.js), '注入脚本应捕获 cf_clearance 与真实 UA');
+    var inputCard = lastResult.filter(function (c) { return c.col_type === 'input'; })[0];
+    assert.ok(inputCard && /\.importCookie\(input\)/.test(inputCard.url), '缺手动导入输入框');
+});
+
+test('验证会话成对保存并在请求/播放头中回放', function () {
+    store = {}; FETCH_MODE = 'ok';
+    var captured = [];
+    var oldFetch = global.fetchPC;
+    global.fetchPC = function (url, opts) { captured.push(opts && opts.headers || {}); return oldFetch(url, opts); };
+    pages.renderList({ url: 'https://hanime1.me/', title: '列表', page: 1 });
+    assert.ok(!captured[0].Cookie, '无会话时不应携带 Cookie');
+    assert.strictEqual(captured[0]['User-Agent'], core.config.userAgent, '无会话时应使用桌面默认 UA');
+    store = {}; /* 清空页面缓存，强制二次真实请求（会话在 putVar 中，随后重存） */
+    captured = [];
+    core.saveSession('cf_clearance=abc123', 'Mozilla/5.0 (Linux; Android 13) Mobile');
+    pages.renderList({ url: 'https://hanime1.me/', title: '列表', page: 1 });
+    global.fetchPC = oldFetch;
+    assert.strictEqual(captured[0].Cookie, 'cf_clearance=abc123', '会话 Cookie 未回放');
+    assert.strictEqual(captured[0]['User-Agent'], 'Mozilla/5.0 (Linux; Android 13) Mobile', '签发 UA 未原样回放');
+    var session = core.verifiedSession();
+    assert.deepStrictEqual(session, { cookie: 'cf_clearance=abc123', ua: 'Mozilla/5.0 (Linux; Android 13) Mobile' }, '会话读取不一致');
+    var playHeaders = core.playerHeaders({ url: 'https://hanime1.me/watch?v=1' });
+    assert.strictEqual(playHeaders['User-Agent'], 'Mozilla/5.0 (Linux; Android 13) Mobile', '播放头未回放会话 UA');
+    store = {};
+});
+
+test('手动导入解析 cf_clearance（完整串或裸值）', function () {
+    store = {};
+    assert.ok(/已导入/.test(pages.importCookie('cf_clearance=xYz_123; other=1')), '完整串导入失败');
+    assert.strictEqual(core.verifiedSession().cookie, 'cf_clearance=xYz_123');
+    assert.ok(/已导入/.test(pages.importCookie('BareToken-9_8')), '裸值导入失败');
+    assert.strictEqual(core.verifiedSession().cookie, 'cf_clearance=BareToken-9_8');
+    assert.ok(/请粘贴|未识别/.test(pages.importCookie('垃圾内容!!')), '非法输入应有提示');
+    assert.ok(/请粘贴/.test(pages.importCookie('')), '空输入应有提示');
+    store = {};
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

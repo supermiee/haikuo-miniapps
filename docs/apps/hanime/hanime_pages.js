@@ -1,6 +1,6 @@
 /* Hanime1 页面层。JSON 入口只加载本模块。菜单与筛选结构与源站繁體中文界面保持一致。 */
 (function () {
-    var MODULE_VERSION = '6';
+    var MODULE_VERSION = '7';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
@@ -51,7 +51,7 @@
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
             var pages;
-            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=6'); } catch (ignore) {}
+            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=7'); } catch (ignore) {}
             if (!pages || typeof pages[payload.method] !== 'function') {
                 setResult([{ title: 'Hanime1 模块加载失败', desc: '请检查网络后重试；若持续失败，请重新订阅更新。method=' + payload.method, col_type: 'text_center_1' }]);
                 return;
@@ -119,7 +119,7 @@
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
         if (!page.ok) { setHomeResult(failure(page.error, url, { method: 'renderHome', params: {} })); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=6').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=7').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
         result.push({ title: '收藏', url: emptyRule('renderFavorites', {}), col_type: 'scroll_button' });
@@ -179,17 +179,28 @@
     function verificationScript() {
         return $.toString(function () {
             (function () {
-                function syncCookie() {
+                var timer = null, tries = 0;
+                function grab() {
+                    tries++;
                     try {
-                        var cookie = fy_bridge_app.getCookie('');
-                        if (cookie && cookie.indexOf('cf_clearance=') >= 0) {
-                            fy_bridge_app.putVar('hanime1.webCookie', cookie);
-                            fy_bridge_app.setWebTitle('验证完成，可返回刷新小程序');
+                        /* 双路取 cookie：页面上下文 document.cookie + 桥接 CookieManager，取并集 */
+                        var raw = String(document.cookie || '');
+                        try {
+                            var bridged = fy_bridge_app.getCookie(String(location.href || ''));
+                            if (bridged && String(bridged).length > raw.length) raw = String(bridged);
+                        } catch (ignoreBridge) {}
+                        var match = /(?:^|;\s*)(cf_clearance=[^;]+)/.exec(raw);
+                        if (match) {
+                            /* 成对保存 cookie 与签发时的真实 UA：请求回放时 UA 必须一致 */
+                            fy_bridge_app.putVar('hanime1.webSession', JSON.stringify({ cookie: match[1], ua: navigator.userAgent }));
+                            fy_bridge_app.setWebTitle('✅ 验证成功，请返回并刷新');
+                            if (timer) clearInterval(timer);
                         }
                     } catch (ignore) {}
+                    if (tries > 300 && timer) clearInterval(timer);
                 }
-                syncCookie();
-                setInterval(syncCookie, 1000);
+                grab();
+                timer = setInterval(grab, 800);
             })();
         });
     }
@@ -197,12 +208,15 @@
         var c = core(), source = c.config.sources[0] + '/';
         try { setPageTitle('验证并同步'); } catch (ignore) {}
         setResult([
-            { title: '验证并同步', desc: '请在下方网页完成 Cloudflare 验证。检测到 cf_clearance 后会仅在本次海阔运行中同步给小程序请求；退出海阔后自动失效。', col_type: 'long_text', extra: { textSize: 16, lineVisible: false } },
-            { title: 'Hanime1 网页验证', url: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.userAgent, referer: source, canBack: true, js: verificationScript() } },
-            { title: '若上方网页空白，点此在浏览器完成验证', url: 'web://' + source, col_type: 'text_center_1' },
-            { title: '验证完成后返回并刷新', url: $('hiker://empty').lazyRule(function () { back(true); return 'toast://已返回主页，请刷新'; }), col_type: 'text_center_1' }
+            { title: '验证并同步', desc: '在下方网页完成 Cloudflare 人机验证。检测到 cf_clearance 后会连同验证时的浏览器标识一起保存（退出海阔前有效），后续请求将原样回放，避免再次拦截。', col_type: 'long_text', extra: { textSize: 16, lineVisible: false } },
+            { title: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.mobileUa, referer: source, canBack: true, js: verificationScript() } },
+            { title: '手动导入 cf_clearance（备用）', desc: '若内嵌网页反复验证不通过：①点下方「在浏览器完成验证」；②通过后复制 cookie 中的 cf_clearance 值；③粘贴到本输入框。注意：浏览器与手机指纹不同时可能仍被拦截，优先使用上方网页验证。', col_type: 'long_text', extra: { textSize: 14, lineVisible: false } },
+            { title: '粘贴 cf_clearance', url: "$.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=7').importCookie(input)", col_type: 'input', extra: { defaultValue: '' } },
+            { title: '在浏览器完成验证', url: 'web://' + source, col_type: 'text_center_1' },
+            { title: '验证完成后返回并刷新', url: $('hiker://empty').lazyRule(function () { back(true); return 'toast://已返回，请刷新'; }), col_type: 'text_center_1' }
         ]);
     }
+    function importCookie(value) { return core().importCookie(value); }
     function toggleFavorite(item) { var added = core().toggleFavorite(item); refreshPage(false); return 'toast://' + (added ? '已收藏' : '已取消收藏'); }
     function renderFavorites() { renderLocal('favorites', '我的收藏'); }
     function renderHistory() { renderLocal('history', '观看历史'); }
@@ -211,7 +225,7 @@
         for (var i = 0; i < items.length; i++) result.push(card(items[i]));
         if (!items.length) result.push({ title: '暂无内容', col_type: 'text_center_1' }); setResult(result);
     }
-    var exported = { routeSearch: routeSearch, renderHome: renderHome, renderList: renderList, renderDetail: renderDetail, renderVerification: renderVerification, toggleFavorite: toggleFavorite, renderFavorites: renderFavorites, renderHistory: renderHistory };
+    var exported = { routeSearch: routeSearch, renderHome: renderHome, renderList: renderList, renderDetail: renderDetail, renderVerification: renderVerification, toggleFavorite: toggleFavorite, renderFavorites: renderFavorites, renderHistory: renderHistory, importCookie: importCookie };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();

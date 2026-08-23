@@ -1,9 +1,12 @@
 /* Hanime1 公共内核：请求、解析、缓存与播放地址处理。数据一律取自源站繁體中文界面。 */
 (function () {
     var CONFIG = {
-        version: '6',
+        version: '7',
         sources: ['https://hanime1.me'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
+        /* 验证用移动端 UA：X5 内核带桌面指纹过不了 Cloudflare 托管挑战，会无限循环 */
+        mobileUa: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        sessionKey: 'hanime1.webSession',
         timeout: 12000,
         cachePrefix: 'hanime1.',
         limits: { home: 12, history: 100 }
@@ -51,7 +54,35 @@
         return output.join('; ');
     }
     function verifiedCookie() {
-        try { return String(getVar(CONFIG.cachePrefix + 'webCookie', '') || ''); } catch (ignore) { return ''; }
+        var session = verifiedSession();
+        return session ? session.cookie : '';
+    }
+    /* 验证会话 = cf_clearance + 签发时的 UA，二者必须成对回放（Cloudflare 按 UA+IP 绑定签发） */
+    function verifiedSession() {
+        try {
+            var raw = String(getVar(CONFIG.sessionKey, '') || '');
+            if (!raw) return null;
+            if (raw.indexOf('{') < 0) return { cookie: raw, ua: '' };
+            var parsed = JSON.parse(raw);
+            if (!parsed || !parsed.cookie) return null;
+            return { cookie: String(parsed.cookie), ua: String(parsed.ua || '') };
+        } catch (ignore) { return null; }
+    }
+    function saveSession(cookie, ua) {
+        var payload = JSON.stringify({ cookie: String(cookie || ''), ua: String(ua || '') });
+        try { putVar(CONFIG.sessionKey, payload); } catch (ignore) {}
+        return payload;
+    }
+    /* 手动导入兜底：接受完整 cookie 串或裸 cf_clearance 值 */
+    function importCookie(value) {
+        var text = String(value || '').trim();
+        if (!text) return 'toast://请粘贴包含 cf_clearance 的内容';
+        var match = /cf_clearance\s*=\s*([^;\s"']+)/i.exec(text);
+        var token = match ? match[1] : (/^[A-Za-z0-9_%\-]+$/.test(text) ? text : '');
+        if (!token) return 'toast://未识别到 cf_clearance';
+        saveSession('cf_clearance=' + token, CONFIG.mobileUa);
+        try { storage0.putMyVar(cacheKey('page.' + CONFIG.sources[0] + '/'), { savedAt: 0, value: {} }); } catch (ignore) {}
+        return 'toast://已导入验证会话，请返回并刷新';
     }
     function usable(html, marker) {
         if (!html || html.length < 300) return false;
@@ -80,8 +111,10 @@
         for (var i = 0; i < CONFIG.sources.length; i++) {
             var target = replaceHost(url, CONFIG.sources[i]);
             try {
-                var headers = { 'User-Agent': CONFIG.userAgent, Referer: CONFIG.sources[i] + '/', 'Accept-Language': 'zh-TW,zh-CN;q=0.9,zh;q=0.8' }, cookie = verifiedCookie();
-                if (cookie) headers.Cookie = cookie;
+                /* 有验证会话时必须原样回放签发时的 UA，否则 cf_clearance 因 UA 不匹配而失效 */
+                var session = verifiedSession();
+                var headers = { 'User-Agent': session && session.ua ? session.ua : CONFIG.userAgent, Referer: CONFIG.sources[i] + '/', 'Accept-Language': 'zh-TW,zh-CN;q=0.9,zh;q=0.8' };
+                if (session && session.cookie) headers.Cookie = session.cookie;
                 var raw = fetchPC(target, { headers: headers, timeout: options.timeout || CONFIG.timeout, withStatusCode: true, withHeaders: true });
                 var page = response(raw), html = page.body || '', status = Number(page.statusCode || 0);
                 if ((status === 0 || status < 400) && usable(html, options.marker)) {
@@ -289,13 +322,20 @@
         for (var i = 0; i < old.length && output.length < CONFIG.limits.history; i++) if (old[i].url !== item.url) output.push(old[i]);
         return writeList('history', output);
     }
-    function playerHeaders(page) { var headers = { Referer: page.url, Origin: origin(page.url), 'User-Agent': CONFIG.userAgent }; if (page.cookie) headers.Cookie = page.cookie; return headers; }
+    function playerHeaders(page) {
+        var session = verifiedSession();
+        var headers = { Referer: page.url, Origin: origin(page.url), 'User-Agent': session && session.ua ? session.ua : CONFIG.userAgent };
+        if (page.cookie) headers.Cookie = page.cookie;
+        else if (session && session.cookie) headers.Cookie = session.cookie;
+        return headers;
+    }
 
     var exported = {
         config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached,
         parseCards: parseCards, parseNav: parseNav, parseGenres: parseGenres, parseSorts: parseSorts,
         parseYears: parseYears, parseMonths: parseMonths, parseTagOptions: parseTagOptions, parseSections: parseSections,
-        parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite, addHistory: addHistory, verifiedCookie: verifiedCookie
+        parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite,
+        addHistory: addHistory, verifiedCookie: verifiedCookie, verifiedSession: verifiedSession, saveSession: saveSession, importCookie: importCookie
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
