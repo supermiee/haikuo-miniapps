@@ -293,7 +293,7 @@ test('验证页使用移动端 UA 并提供手动导入', function () {
     assert.ok(webviewCard.extra.ua.indexOf('Android') > 0 && webviewCard.extra.ua.indexOf('Windows') < 0, 'UA 指纹不是移动端');
     assert.ok(/cf_clearance/.test(webviewCard.extra.js) && /navigator\.userAgent/.test(webviewCard.extra.js), '注入脚本应捕获 cf_clearance 与真实 UA');
     var t = titles(lastResult);
-    assert.ok(t.join('|').indexOf('同步并返回') >= 0, '缺第二步同步返回引导');
+    assert.ok(t.join('|').indexOf('点此返回并刷新') >= 0, '缺第二步返回引导');
     assert.ok(!/在浏览器完成验证/.test(titles(lastResult).join('|')), '不应再引导去外部浏览器验证（凭证不可转移）');
     var inputCard = lastResult.filter(function (c) { return c.col_type === 'input'; })[0];
     assert.ok(inputCard && /\.importCookie\(input\)/.test(inputCard.url), '缺手动导入输入框');
@@ -412,15 +412,33 @@ test('硬拦失败短缓存：30s 内重复点击不再发请求，验证后立�
     store = {};
 });
 
-test('第二步按钮在规则上下文同步桥接 cookie', function () {
+test('第二步按钮置位 webviewMode 并清缓存', function () {
     store = {};
     pages.renderVerification();
-    var btn = lastResult.filter(function (c) { return /同步并返回/.test(c.title); })[0];
-    assert.ok(btn, '缺第二步同步按钮');
+    var btn = lastResult.filter(function (c) { return /第二步/.test(c.title); })[0];
+    assert.ok(btn, '缺第二步按钮');
     var src = JSON.parse(btn.url).lazy;
-    assert.ok(/getCookie\('https:\/\/hanime1\.me\//.test(src), '未从桥接读取 cookie 罐');
-    assert.ok(/saveSession/.test(src), '未保存会话');
-    assert.ok(/hanime_core\.js\?v=10/.test(src), '回调内 require 版本字面量过期');
+    assert.ok(/putVar\('hanime1\.webviewMode', '1'\)/.test(src), '未置位 webviewMode');
+    assert.ok(/clearPageCache/.test(src), '未清理失败缓存');
+    assert.ok(/hanime_core\.js\?v=11/.test(src), '回调内 require 版本字面量过期');
+    assert.ok(!/未检测到凭证/.test(src), '不应再做凭证检测（桥接读罐不可靠）');
+});
+
+test('webviewMode 置位后请求优先走 WebView，不再打 fetchPC', function () {
+    store = {}; FETCH_MODE = 'block';
+    store['hanime1.webviewMode'] = '1'; /* 模拟第二步按钮置位 */
+    var oldF = global.fetchPC, oldW = global.fetchCodeByWebView;
+    var pc = 0, wv = 0;
+    global.fetchPC = function (u, o) { pc++; return oldF(u, o); };
+    var richPage = '<html><body>' + new Array(21).join('<a href="/watch?v=1">v</a>') + '</body></html>';
+    global.fetchCodeByWebView = function () { wv++; return richPage; };
+    try {
+        pages.renderList({ url: 'https://hanime1.me/', title: 'L1', page: 1 });
+        pages.renderList({ url: 'https://hanime1.me/search?query=x', title: 'L2', page: 1 });
+        assert.strictEqual(wv, 2, '两次请求都应走 WebView');
+        assert.strictEqual(pc, 0, '不应再请求 fetchPC');
+    } finally { global.fetchPC = oldF; if (oldW === undefined) delete global.fetchCodeByWebView; else global.fetchCodeByWebView = oldW; FETCH_MODE = 'ok'; }
+    store = {};
 });
 
 test('注入脚本合并完整 cookie 并整串保存', function () {

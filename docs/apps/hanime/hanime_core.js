@@ -7,6 +7,8 @@
         /* 验证用移动端 UA：X5 内核带桌面指纹过不了 Cloudflare 托管挑战，会无限循环 */
         mobileUa: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
         sessionKey: 'hanime1.webSession',
+        /* WebView 通道可用标记：一旦兜底通道成功即置位，后续请求优先走它 */
+        webviewFlagKey: 'hanime1.webviewMode',
         timeout: 8000,
         webViewTimeout: 12000,
         cachePrefix: 'hanime1.',
@@ -105,9 +107,13 @@
         if (Number(status) === 403) return true;
         return /just a moment|attention required|cf-chl|challenges\.cloudflare\.com|error code: 10\d\d/i.test(String(html || ''));
     }
+    function webviewMode() {
+        try { return !!getVar(CONFIG.webviewFlagKey, ''); } catch (ignore) { return false; }
+    }
     /* 会话三种形态：
      * 1. cookie+ua 齐全 → fetchPC 原样回放（最快）
-     * 2. 仅 cookie（桥接同步而来，UA 未知）→ 走 fetchCodeByWebView：与验证网页共用内核/UA/CookieManager，天然携带凭证
+     * 2. 仅 cookie（桥接同步而来，UA 未知）或历史上有 WebView 成功记录 → 走 fetchCodeByWebView：
+     *    与验证网页共用内核/UA/CookieManager，天然携带凭证
      * 3. 无会话 → fetchPC 直连；硬拦立即给引导 */
     function requestByWebView(url, options) {
         if (typeof fetchCodeByWebView === 'undefined') return null;
@@ -127,8 +133,9 @@
         options = options || {};
         var failures = [], hardBlocked = false;
         var session = verifiedSession();
-        /* UA 未知的会话直接走 WebView：凭证在应用 CookieManager 里，与验证时同源同指纹 */
-        if (session && session.cookie && !session.ua && typeof fetchCodeByWebView !== 'undefined') {
+        var useWebviewFirst = typeof fetchCodeByWebView !== 'undefined' &&
+            ((session && session.cookie && !session.ua) || webviewMode());
+        if (useWebviewFirst) {
             var viaWebview = requestByWebView(url, options);
             if (viaWebview && viaWebview.ok) return viaWebview;
             failures.push({ source: 'webview', status: 0, reason: viaWebview && viaWebview.error ? viaWebview.error : 'webview unusable' });
@@ -148,12 +155,14 @@
                 failures.push({ source: CONFIG.sources[i], status: status, reason: isHardBlock(html, status) ? 'Cloudflare verification' : 'unexpected page structure' });
             } catch (error) { failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) }); }
         }
-        /* 无会话且硬拦 → 必须人工验证，跳过兜底秒级引导；
-         * 已有会话仍硬拦 → 凭证可能只存在于 CookieManager，给 WebView 一次机会再认输 */
-        var allowWebviewFallback = !hardBlocked || !!session;
-        if (typeof fetchCodeByWebView !== 'undefined' && allowWebviewFallback) {
+        /* WebView 兜底：与内嵌验证网页同内核同 CookieManager，用户通过过一次验证后此通道即可通行；
+         * 无任何会话痕迹时的首次硬拦除外（必然需要人工交互，直接给引导避免空等） */
+        if (typeof fetchCodeByWebView !== 'undefined' && (webviewMode() || !!session || !hardBlocked)) {
             var webView = requestByWebView(url, options);
-            if (webView && webView.ok) return webView;
+            if (webView && webView.ok) {
+                try { putVar(CONFIG.webviewFlagKey, '1'); } catch (ignoreFlag) {}
+                return webView;
+            }
             if (webView && webView.error) failures.push({ source: 'webview', status: 0, reason: webView.error });
         } else if (hardBlocked) {
             failures.push({ source: 'webview', status: 0, reason: 'skipped: interactive verification required' });
@@ -368,7 +377,7 @@
         parseCards: parseCards, parseNav: parseNav, parseGenres: parseGenres, parseSorts: parseSorts,
         parseYears: parseYears, parseMonths: parseMonths, parseTagOptions: parseTagOptions, parseSections: parseSections,
         parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite,
-        addHistory: addHistory, verifiedCookie: verifiedCookie, verifiedSession: verifiedSession, saveSession: saveSession, importCookie: importCookie
+        addHistory: addHistory, verifiedCookie: verifiedCookie, verifiedSession: verifiedSession, saveSession: saveSession, importCookie: importCookie, clearPageCache: clearPageCache
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
