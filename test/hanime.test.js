@@ -25,6 +25,8 @@ global.storage0 = {
 };
 global.getVar = function (k, d) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : d; };
 global.putVar = function (k, v) { store[k] = v; };
+global.listMyVarKeys = function () { return Object.keys(store); };
+global.clearMyVar = function (k) { delete store[k]; };
 
 /* 最小 pdfa/pdfh：解析 <a href*=watch> 锚块与标签属性，覆盖 hanime 用到的选择器 */
 global.pdfa = function (html, selector) {
@@ -328,6 +330,53 @@ test('手动导入解析 cf_clearance（完整串或裸值）', function () {
     assert.ok(/请粘贴|未识别/.test(pages.importCookie('垃圾内容!!')), '非法输入应有提示');
     assert.ok(/请粘贴/.test(pages.importCookie('')), '空输入应有提示');
     store = {};
+});
+
+test('硬拦截快速短路：跳过 WebView 兜底，秒级给出验证引导', function () {
+    store = {}; FETCH_MODE = 'block';
+    var pcCalls = 0, webviewCalls = 0;
+    var oldFetch = global.fetchPC, oldWebview = global.fetchCodeByWebView;
+    global.fetchPC = function (u, o) { pcCalls++; return oldFetch(u, o); };
+    global.fetchCodeByWebView = function () { webviewCalls++; return '<html>ok</html>'; };
+    pages.renderList({ url: 'https://hanime1.me/', title: '列表', page: 1 });
+    global.fetchPC = oldFetch;
+    if (oldWebview === undefined) delete global.fetchCodeByWebView; else global.fetchCodeByWebView = oldWebview;
+    FETCH_MODE = 'ok';
+    assert.strictEqual(pcCalls, 1, '硬拦后不应重试更多源');
+    assert.strictEqual(webviewCalls, 0, '硬拦时 WebView 兜底应被跳过');
+    assert.ok(/验证并同步|人机验证/.test(titles(lastResult)[0]), '应直接给出验证引导: ' + titles(lastResult)[0]);
+});
+
+test('完整 cookie 串（含 __cf_bm）原样回放', function () {
+    store = {};
+    core.saveSession('cf_clearance=tok1; __cf_bm=bm123; other=v', 'Mozilla/5.0 MobileUA');
+    var seen = null;
+    var oldFetch = global.fetchPC;
+    global.fetchPC = function (u, o) { seen = o && o.headers || {}; return oldFetch(u, o); };
+    pages.renderList({ url: 'https://hanime1.me/', title: '列表', page: 1 });
+    global.fetchPC = oldFetch;
+    assert.strictEqual(seen.Cookie, 'cf_clearance=tok1; __cf_bm=bm123; other=v', '完整串未回放: ' + seen.Cookie);
+    store = {};
+});
+
+test('保存会话即作废全部页面缓存', function () {
+    store = {};
+    storage0.putMyVar('hanime1.page.https://x', { savedAt: new Date().getTime(), value: {} });
+    core.saveSession('cf_clearance=fresh', 'ua');
+    assert.ok(!Object.prototype.hasOwnProperty.call(store, 'hanime1.page.https://x'), '页面缓存未被清理');
+});
+
+test('超时参数收紧（快速识别挑战）', function () {
+    assert.ok(core.config.timeout <= 9000, 'fetchPC 超时应 ≤9s: ' + core.config.timeout);
+    assert.ok(core.config.webViewTimeout <= 15000, 'WebView 超时应 ≤15s: ' + core.config.webViewTimeout);
+});
+
+test('注入脚本合并完整 cookie 并整串保存', function () {
+    pages.renderVerification();
+    var js = lastResult.filter(function (c) { return c.col_type === 'x5_webview_single'; })[0].extra.js;
+    assert.ok(/mergeCookies/.test(js), '缺双路合并逻辑');
+    assert.ok(/document\.cookie/.test(js) && /getCookie\(String\(location\.href/.test(js), '双通道缺失');
+    assert.ok(/cookie: merged/.test(js), '应保存完整 cookie 串而非仅 cf_clearance');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

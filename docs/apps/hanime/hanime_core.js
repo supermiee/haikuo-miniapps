@@ -1,13 +1,14 @@
 /* Hanime1 公共内核：请求、解析、缓存与播放地址处理。数据一律取自源站繁體中文界面。 */
 (function () {
     var CONFIG = {
-        version: '7',
+        version: '9',
         sources: ['https://hanime1.me'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         /* 验证用移动端 UA：X5 内核带桌面指纹过不了 Cloudflare 托管挑战，会无限循环 */
         mobileUa: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
         sessionKey: 'hanime1.webSession',
-        timeout: 12000,
+        timeout: 8000,
+        webViewTimeout: 12000,
         cachePrefix: 'hanime1.',
         limits: { home: 12, history: 100 }
     };
@@ -68,9 +69,18 @@
             return { cookie: String(parsed.cookie), ua: String(parsed.ua || '') };
         } catch (ignore) { return null; }
     }
+    /* 验证状态变化后，旧的页面缓存（可能包含失败结果或过期数据）全部作废 */
+    function clearPageCache() {
+        try {
+            if (typeof listMyVarKeys === 'undefined' || typeof clearMyVar === 'undefined') return;
+            var all = listMyVarKeys() || [];
+            for (var i = 0; i < all.length; i++) if (String(all[i]).indexOf(cacheKey('page.')) === 0) clearMyVar(all[i]);
+        } catch (ignore) {}
+    }
     function saveSession(cookie, ua) {
         var payload = JSON.stringify({ cookie: String(cookie || ''), ua: String(ua || '') });
         try { putVar(CONFIG.sessionKey, payload); } catch (ignore) {}
+        clearPageCache();
         return payload;
     }
     /* 手动导入兜底：接受完整 cookie 串或裸 cf_clearance 值 */
@@ -81,7 +91,6 @@
         var token = match ? match[1] : (/^[A-Za-z0-9_%\-]+$/.test(text) ? text : '');
         if (!token) return 'toast://未识别到 cf_clearance';
         saveSession('cf_clearance=' + token, CONFIG.mobileUa);
-        try { storage0.putMyVar(cacheKey('page.' + CONFIG.sources[0] + '/'), { savedAt: 0, value: {} }); } catch (ignore) {}
         return 'toast://已导入验证会话，请返回并刷新';
     }
     function usable(html, marker) {
@@ -91,14 +100,19 @@
         return !marker || String(html).indexOf(marker) >= 0;
     }
     function replaceHost(url, host) { return String(url || '').replace(/^https?:\/\/[^/]+/i, host); }
+    /* 硬拦截特征：命中即说明必须人工验证，WebView 兜底也只会白等 */
+    function isHardBlock(html, status) {
+        if (Number(status) === 403) return true;
+        return /just a moment|attention required|cf-chl|challenges\.cloudflare\.com|error code: 10\d\d/i.test(String(html || ''));
+    }
     function requestByWebView(url, options) {
         if (typeof fetchCodeByWebView === 'undefined') return null;
         try {
             var html = fetchCodeByWebView(url, {
-                headers: { 'User-Agent': CONFIG.userAgent, Referer: origin(url) + '/' },
-                timeout: (options && options.webViewTimeout) || 30000,
+                headers: { 'User-Agent': CONFIG.mobileUa, Referer: origin(url) + '/' },
+                timeout: (options && options.webViewTimeout) || CONFIG.webViewTimeout,
                 checkJs: $.toString(function () {
-                    return document.querySelector('a[href*="/watch?v="], a[href*="/watch/"], meta[property="og:title"]');
+                    return !!document.querySelector('a[href*="/watch?v="], a[href*="/watch/"], meta[property="og:title"]');
                 })
             });
             if (usable(html, options && options.marker)) return { ok: true, url: url, html: html, cookie: '', status: 200, via: 'webview' };
@@ -107,7 +121,7 @@
     }
     function request(url, options) {
         options = options || {};
-        var failures = [];
+        var failures = [], hardBlocked = false;
         for (var i = 0; i < CONFIG.sources.length; i++) {
             var target = replaceHost(url, CONFIG.sources[i]);
             try {
@@ -120,14 +134,19 @@
                 if ((status === 0 || status < 400) && usable(html, options.marker)) {
                     return { ok: true, url: target, html: html, cookie: responseCookie(page.headers), status: status || 200 };
                 }
-                failures.push({ source: CONFIG.sources[i], status: status, reason: /cloudflare|just a moment|attention required|cf-chl/i.test(html) || status === 403 ? 'Cloudflare verification' : 'unexpected page structure' });
+                if (isHardBlock(html, status)) hardBlocked = true;
+                failures.push({ source: CONFIG.sources[i], status: status, reason: isHardBlock(html, status) ? 'Cloudflare verification' : 'unexpected page structure' });
             } catch (error) { failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) }); }
         }
-        /* WebView executes the public page's JavaScript. It is a fallback for a verified user session, not a challenge bypass. */
-        var webView = requestByWebView(url, options);
-        if (webView && webView.ok) return webView;
-        if (webView && webView.error) failures.push({ source: 'webview', status: 0, reason: webView.error });
-        return { ok: false, url: url, error: { code: 'NETWORK_OR_VERIFICATION', message: '站点不可用或需要在网页完成验证', failures: failures } };
+        /* 硬拦截时跳过 WebView 兜底：挑战需要人工交互，等待只会拖慢识别（秒级给出引导） */
+        if (!hardBlocked) {
+            var webView = requestByWebView(url, options);
+            if (webView && webView.ok) return webView;
+            if (webView && webView.error) failures.push({ source: 'webview', status: 0, reason: webView.error });
+        } else {
+            failures.push({ source: 'webview', status: 0, reason: 'skipped: interactive verification required' });
+        }
+        return { ok: false, url: url, error: { code: 'NETWORK_OR_VERIFICATION', message: hardBlocked ? '站点要求人机验证，请使用「验证并同步」' : '站点不可用或需要在网页完成验证', failures: failures } };
     }
     function cacheKey(key) { return CONFIG.cachePrefix + key; }
     function readCache(key, ttl) {

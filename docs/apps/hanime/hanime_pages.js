@@ -1,6 +1,6 @@
 /* Hanime1 页面层。JSON 入口只加载本模块。菜单与筛选结构与源站繁體中文界面保持一致。 */
 (function () {
-    var MODULE_VERSION = '8';
+    var MODULE_VERSION = '9';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
@@ -51,7 +51,7 @@
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
             var pages;
-            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=8'); } catch (ignore) {}
+            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=9'); } catch (ignore) {}
             if (!pages || typeof pages[payload.method] !== 'function') {
                 setResult([{ title: 'Hanime1 模块加载失败', desc: '请检查网络后重试；若持续失败，请重新订阅更新。method=' + payload.method, col_type: 'text_center_1' }]);
                 return;
@@ -119,7 +119,7 @@
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
         if (!page.ok) { setHomeResult(failure(page.error, url, { method: 'renderHome', params: {} })); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=8').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=9').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
         result.push({ title: '收藏', url: emptyRule('renderFavorites', {}), col_type: 'scroll_button' });
@@ -180,19 +180,33 @@
         return $.toString(function () {
             (function () {
                 var timer = null, tries = 0;
+                function mergeCookies() {
+                    /* 双路取完整 cookie：页面上下文 document.cookie + 桥接 CookieManager（含 HttpOnly），按名合并 */
+                    var map = {}, order = [];
+                    function add(source) {
+                        var pairs = String(source || '').split(';');
+                        for (var i = 0; i < pairs.length; i++) {
+                            var pair = pairs[i], at = pair.indexOf('=');
+                            if (at < 1) continue;
+                            var key = pair.slice(0, at).replace(/^\s+|\s+$/g, '');
+                            if (!key) continue;
+                            if (map[key] === undefined) order.push(key);
+                            map[key] = pair.slice(at + 1);
+                        }
+                    }
+                    add(document.cookie);
+                    try { add(fy_bridge_app.getCookie(String(location.href || ''))); } catch (ignoreBridge) {}
+                    var out = [];
+                    for (var j = 0; j < order.length; j++) out.push(order[j] + '=' + map[order[j]]);
+                    return out.join('; ');
+                }
                 function grab() {
                     tries++;
                     try {
-                        /* 双路取 cookie：页面上下文 document.cookie + 桥接 CookieManager，取并集 */
-                        var raw = String(document.cookie || '');
-                        try {
-                            var bridged = fy_bridge_app.getCookie(String(location.href || ''));
-                            if (bridged && String(bridged).length > raw.length) raw = String(bridged);
-                        } catch (ignoreBridge) {}
-                        var match = /(?:^|;\s*)(cf_clearance=[^;]+)/.exec(raw);
-                        if (match) {
-                            /* 成对保存 cookie 与签发时的真实 UA：请求回放时 UA 必须一致 */
-                            fy_bridge_app.putVar('hanime1.webSession', JSON.stringify({ cookie: match[1], ua: navigator.userAgent }));
+                        var merged = mergeCookies();
+                        if (merged.indexOf('cf_clearance=') >= 0) {
+                            /* 完整 cookie 串与签发时的真实 UA 成对保存；请求回放时 UA 必须一致 */
+                            fy_bridge_app.putVar('hanime1.webSession', JSON.stringify({ cookie: merged, ua: navigator.userAgent }));
                             fy_bridge_app.setWebTitle('✅ 验证成功，请返回并刷新');
                             if (timer) clearInterval(timer);
                         }
@@ -212,7 +226,7 @@
             { title: '打开验证网页', url: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.mobileUa, referer: source, canBack: true, js: verificationScript() } },
             { title: '第二步：验证成功后，点此返回并刷新', url: $('hiker://empty').lazyRule(function () { back(true); return 'toast://已返回，请刷新'; }), col_type: 'text_center_1' },
             { title: '常见问题', desc: '· 网页空白或反复要求验证：点击网页右上角菜单刷新一次再试。\n· 在外部浏览器（Chrome 等）通过的验证对本小程序无效：凭证与浏览器指纹绑定，无法转移，请务必在上方的内嵌网页里完成。\n· 备用方案（需电脑）：电脑 Chrome 打开 hanime1.me 完成验证 → F12 → Application → Cookies → 复制 cf_clearance 的值，粘贴到下方输入框。', col_type: 'long_text', extra: { textSize: 14, lineVisible: false } },
-            { title: '备用：粘贴 cf_clearance', desc: '仅在内嵌网页始终无法通过时使用。粘贴后自动保存并返回刷新。', url: "$.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=8').importCookie(input)", col_type: 'input', extra: { defaultValue: '' } }
+            { title: '备用：粘贴 cf_clearance', desc: '仅在内嵌网页始终无法通过时使用。粘贴后自动保存并返回刷新。', url: "$.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=9').importCookie(input)", col_type: 'input', extra: { defaultValue: '' } }
         ]);
     }
     function importCookie(value) { return core().importCookie(value); }
