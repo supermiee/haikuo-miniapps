@@ -1,25 +1,57 @@
-/* Hanime1 页面层。JSON 入口只加载本模块。 */
+/* Hanime1 页面层。JSON 入口只加载本模块。菜单与筛选结构与源站繁體中文界面保持一致。 */
 (function () {
-    var MODULE_VERSION = '4';
+    var MODULE_VERSION = '6';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
     function remote(url, fallback) { try { return $.require(url); } catch (ignore) { return $.require(fallback); } }
-    function core() { return remote(PUBLISH_BASE + 'hanime_core.js?v=' + MODULE_VERSION, CORE_PATH); }
+    function core() { return remote(PUBLISH_BASE + 'apps/hanime/hanime_core.js?v=' + MODULE_VERSION, CORE_PATH); }
     function decodeSafe(value) { try { return decodeURIComponent(value); } catch (ignore) { return value; } }
+    /* values 支持数组（如 tags[] 多选），重复输出同名参数；空串/null 删除该键 */
     function addQuery(url, values) {
         var split = String(url || '').split('?'), path = split.shift(), source = split.join('?').split('&'), map = {}, output = [];
-        for (var i = 0; i < source.length; i++) if (source[i]) { var pair = source[i].split('='); /* Hiker 原生搜索会把未编码的关键词塞进 MY_URL，% 等字符会让 decodeURIComponent 直接抛 URIError */ map[decodeSafe(pair[0])] = pair.length > 1 ? decodeSafe(pair.slice(1).join('=')) : ''; }
-        for (var key in values) if (values.hasOwnProperty(key)) { if (values[key] !== '' && values[key] !== null && typeof values[key] !== 'undefined') map[key] = values[key]; else delete map[key]; }
-        for (var name in map) if (map.hasOwnProperty(name)) output.push(encodeURIComponent(name) + '=' + encodeURIComponent(map[name]));
+        for (var i = 0; i < source.length; i++) if (source[i]) {
+            var pair = source[i].split('=');
+            /* Hiker 原生搜索会把未编码的关键词塞进 MY_URL，% 等字符会让 decodeURIComponent 直接抛 URIError */
+            var key = decodeSafe(pair[0]), value = pair.length > 1 ? decodeSafe(pair.slice(1).join('=')) : '';
+            if (map[key] === undefined) map[key] = value;
+            else if (map[key].push) map[key].push(value);
+            else map[key] = [map[key], value];
+        }
+        for (var name in values) if (values.hasOwnProperty(name)) {
+            var v = values[name];
+            var blank = v === '' || v === null || typeof v === 'undefined' || (!!v.push && !v.length);
+            if (blank) delete map[name]; else map[name] = v;
+        }
+        for (var key2 in map) if (map.hasOwnProperty(key2)) {
+            var val = map[key2];
+            if (val && val.push) { for (var j = 0; j < val.length; j++) output.push(encodeURIComponent(key2) + '=' + encodeURIComponent(val[j])); }
+            else output.push(encodeURIComponent(key2) + '=' + encodeURIComponent(val));
+        }
         return path + (output.length ? '?' + output.join('&') : '');
+    }
+    /* 解析 /search URL 上的筛选状态，供筛选菜单回显与重建 */
+    function facetsOf(url) {
+        var query = String(url || '').split('?')[1] || '', pairs = query.split('&'), facets = { tags: [] };
+        for (var i = 0; i < pairs.length; i++) if (pairs[i]) {
+            var pair = pairs[i].split('='), key = decodeSafe(pair[0]), value = pair.length > 1 ? decodeSafe(pair.slice(1).join('=')) : '';
+            if (/^tags(?:\[\]|%5B%5D)$/i.test(key)) { if (value) facets.tags.push(value); }
+            else facets[key] = value;
+        }
+        return facets;
+    }
+    function searchUrl(facets) {
+        var c = core(), values = {};
+        ['query', 'genre', 'sort', 'year', 'month'].forEach(function (key) { if (facets[key]) values[key] = facets[key]; });
+        if (facets.tags && facets.tags.length) values['tags[]'] = facets.tags;
+        return addQuery(c.config.sources[0] + '/search', values);
     }
     function pageUrl(url, page) { return Number(page || 1) > 1 ? addQuery(url, { page: String(page) }) : addQuery(url, { page: '' }); }
     function pagedSource(url) { return addQuery(url, { page: 'fypage' }) + '[firstPage=' + url + ']'; }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
             var pages;
-            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=4'); } catch (ignore) {}
+            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=6'); } catch (ignore) {}
             if (!pages || typeof pages[payload.method] !== 'function') {
                 setResult([{ title: 'Hanime1 模块加载失败', desc: '请检查网络后重试；若持续失败，请重新订阅更新。method=' + payload.method, col_type: 'text_center_1' }]);
                 return;
@@ -28,13 +60,17 @@
             pages[payload.method](payload.params);
         }, { method: method, params: params || {} });
     }
-    function routeList(url, title) { return emptyRule('renderList', { url: url, title: title || '影片列表' }, pagedSource(url)); }
+    function routeList(url, title) { return emptyRule('renderList', { url: url, title: title }, pagedSource(url)); }
     function routeDetail(item) { return emptyRule('renderDetail', item); }
     function routeVerification() { return emptyRule('renderVerification', {}); }
-    function routeSearch(keyword, sort) { return routeList(addQuery(core().config.sources[0] + '/search', { query: keyword, sort: sort || '最新上市' }), '搜索：' + keyword); }
+    function routeSearch(keyword, facets) {
+        var merged = facets || {}; merged.query = keyword;
+        return routeList(searchUrl(merged), '搜索：' + keyword);
+    }
     function card(item) { return { title: item.title, pic_url: item.image || '', desc: item.remark || '点击查看详情', url: routeDetail(item), col_type: 'movie_2' }; }
+    /* 仅在请求确实被拦截时才引导验证；正常浏览不出现该入口 */
     function failure(error, url, retryParams) {
-        return [{ title: error && error.message || '页面加载失败', desc: '请使用“验证并同步”完成站点验证，再返回刷新。', col_type: 'text_center_1' }, { title: '重试', url: emptyRule(retryParams && retryParams.method || 'renderList', retryParams && retryParams.params || { url: url, title: '重试' }), col_type: 'text_center_1' }, { title: '验证并同步', url: routeVerification(), col_type: 'text_center_1' }, { title: '在网页打开', url: 'web://' + url, col_type: 'text_center_1' }];
+        return [{ title: error && error.message || '页面加载失败', desc: '站点要求网页验证时，请使用“验证并同步”完成后再刷新。', col_type: 'text_center_1' }, { title: '重试', url: emptyRule(retryParams && retryParams.method || 'renderList', retryParams && retryParams.params || { url: url, title: '重试' }), col_type: 'text_center_1' }, { title: '验证并同步', url: routeVerification(), col_type: 'text_center_1' }, { title: '在网页打开', url: 'web://' + url, col_type: 'text_center_1' }];
     }
     function section(result, title, items, more) {
         if (!items.length) return;
@@ -42,18 +78,63 @@
         for (var i = 0; i < items.length; i++) result.push(card(items[i]));
         if (more) result.push({ title: '查看全部', url: more, col_type: 'text_center_1' });
     }
+    /* 筛选菜单：选项全部取自源站当前页面结构（排序面板/类型下拉/年份月份下拉/tags[] 复选框） */
+    function filterRows(result, c, html, url) {
+        if (String(url).indexOf('/search') < 0) return;
+        var facets = facetsOf(url);
+        function chipUrl(field, optionValue) {
+            var next = {};
+            for (var k in facets) if (facets.hasOwnProperty(k)) next[k] = facets[k];
+            next[field] = optionValue;
+            return searchUrl(next);
+        }
+        function row(label, options, field, multi) {
+            if (!options || !options.length) return;
+            result.push({ title: label, col_type: 'long_text', extra: { textSize: 14, lineVisible: false } });
+            for (var i = 0; i < options.length; i++) {
+                var opt = options[i], value = typeof opt === 'string' ? opt : opt.value, display = typeof opt === 'string' ? opt : (opt.title || opt.value);
+                var selected = multi ? facets.tags.indexOf(value) >= 0 : String(facets[field] || '') === String(value);
+                if (multi) {
+                    var tags = facets.tags.slice(0), at = tags.indexOf(value);
+                    if (at >= 0) tags.splice(at, 1); else tags.push(value);
+                    var nextFacets = {}; for (var k2 in facets) if (facets.hasOwnProperty(k2)) nextFacets[k2] = facets[k2];
+                    nextFacets.tags = tags;
+                    result.push({ title: (selected ? '✓ ' : '') + display, url: routeList(searchUrl(nextFacets), paramsTitle(facets)), col_type: 'scroll_button' });
+                } else {
+                    result.push({ title: (selected ? '✓ ' : '') + display, url: routeList(chipUrl(field, selected ? '' : value), paramsTitle(facets)), col_type: 'scroll_button' });
+                }
+            }
+        }
+        row('排序', c.parseSorts(html), 'sort');
+        row('類型', c.parseGenres(html), 'genre');
+        row('年份', c.parseYears(html), 'year');
+        row('月份', c.parseMonths(html), 'month');
+        row('標籤', c.parseTagOptions(html), 'tags', true);
+    }
+    function paramsTitle(facets) {
+        if (facets.query) return '搜索：' + facets.query;
+        if (facets.genre) return facets.genre;
+        return '影片列表';
+    }
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
         if (!page.ok) { setHomeResult(failure(page.error, url, { method: 'renderHome', params: {} })); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=4').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
-        result.push({ title: '验证并同步', desc: c.verifiedCookie() ? '已检测到本次运行的验证状态；需要时可重新验证。' : '首次使用或显示不可用时，请先在此完成网页验证。', url: routeVerification(), col_type: 'scroll_button' });
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=6').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
         result.push({ title: '收藏', url: emptyRule('renderFavorites', {}), col_type: 'scroll_button' });
         result.push({ title: '历史', url: emptyRule('renderHistory', {}), col_type: 'scroll_button' });
-        var items = c.parseCards(page.html, page.url, c.config.limits.home);
-        section(result, '首页推荐', items, routeList(url, '首页推荐'));
-        if (!items.length) result.push({ title: '首页已加载，但未解析到影片卡片', url: 'web://' + page.url, col_type: 'text_center_1' });
+        /* 首页板块与源站一致：逐板块解析「查看更多」锚点区间内的卡片 */
+        var sections = c.parseSections(page.html, page.url), added = 0;
+        for (var s = 0; s < sections.length && s < 6; s++) {
+            var before = result.length;
+            section(result, sections[s].title, c.parseCards(sections[s].html, page.url, 6), routeList(sections[s].url, sections[s].title));
+            if (result.length > before) added++;
+        }
+        if (!added) {
+            section(result, '最新上市', c.parseCards(page.html, page.url, c.config.limits.home), routeList(c.config.sources[0] + '/search?sort=' + encodeURIComponent('最新上市'), '最新上市'));
+            if (!added && !c.parseCards(page.html, page.url, 1).length) result.push({ title: '首页已加载，但未解析到影片卡片', url: 'web://' + page.url, col_type: 'text_center_1' });
+        }
         setHomeResult(result);
     }
     function renderList(params) {
@@ -61,7 +142,10 @@
         if (!page.ok) { setResult(failure(page.error, requested, { method: 'renderList', params: params })); return; }
         try { setPageTitle(params.title || '影片列表'); } catch (ignore) {}
         var result = [], items = c.parseCards(page.html, page.url);
-        if (Number(params.page || 1) === 1) result.push({ title: params.title || '影片列表', col_type: 'long_text', extra: { textSize: 18, lineVisible: false } });
+        if (Number(params.page || 1) === 1) {
+            result.push({ title: params.title || paramsTitle(facetsOf(params.url)), col_type: 'long_text', extra: { textSize: 18, lineVisible: false } });
+            filterRows(result, c, page.html, params.url);
+        }
         for (var i = 0; i < items.length; i++) result.push(card(items[i]));
         if (!items.length) result.push({ title: '未解析到影片；页面结构可能已变化或要求验证。', url: 'web://' + page.url, col_type: 'text_center_1' });
         setResult(result);
@@ -70,7 +154,7 @@
         item = item || {}; var c = core(), page = c.fetchCached(item.url, { marker: 'og:title' }, 300);
         if (!page.ok) { setResult(failure(page.error, item.url, { method: 'renderDetail', params: item })); return; }
         var detail = c.parseDetail(page); c.addHistory({ url: detail.url, title: detail.title || item.title, image: detail.image || item.image });
-        try { setPageTitle(detail.title || item.title || '视频详情'); } catch (ignore) {}
+        try { setPageTitle(detail.title || item.title || '视频详情'); } catch (ignoreTitle) {}
         try { if (detail.image) setPagePicUrl(detail.image); } catch (ignoreImage) {}
         var result = [];
         if (detail.image) result.push({ pic_url: detail.image, col_type: 'pic_1_full', extra: { lineVisible: false } });

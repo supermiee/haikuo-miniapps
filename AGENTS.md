@@ -2,21 +2,22 @@
 
 ## What this repo is
 
-Static JavaScript rules ("mini-apps") for the Hiker (海阔视界) Android video app. There is **no build system, package.json, linter, test suite, or CI** — the repo root contains only `docs/`.
+Static JavaScript rules ("mini-apps") for the Hiker (海阔视界) Android video app. There is **no build system, package.json, or CI** — only `docs/` (GitHub Pages web root), `test/` and `AGENTS.md`.
 
 - `docs/` is served directly by **GitHub Pages** (`https://supermiee.github.io/haikuo-miniapps/`, `.nojekyll` present). Pushing to `main` publishes immediately.
-- Three apps: `jable_*`, `missav_*`, `hanime_*`. Each has:
-  - `<app>_core.js` — kernel: HTTP via `fetchPC` (multi-host failover), HTML parsing (regex + Hiker `pdfa`/`pdfh`), caching via `storage0`, diagnostics.
-  - `<app>_pages.js` — page layer: renders screens via Hiker APIs (`setResult`, `setHomeResult`, `$().rule()`, `.lazyRule()`); the only entrypoint loaded by the JSON subscription.
-  - Subscription entries in `*-subscription.json` (`jable-subscription.json` also holds the MissAV/Hanime entries) point at `<app>_pages.js` over HTTPS.
+- Layout:
+  - `docs/apps/<app>/<app>_core.js` — kernel: HTTP via `fetchPC` (multi-host failover), HTML parsing (regex + Hiker `pdfa`/`pdfh`), caching via `storage0`, diagnostics.
+  - `docs/apps/<app>/<app>_pages.js` — page layer: renders screens via Hiker APIs (`setResult`, `setHomeResult`, `$().rule()`, `.lazyRule()`); the only entrypoint loaded by the subscription.
+  - `docs/subscription.json` — the **single** subscription manifest, one entry per app (Jable / MissAV / Hanime1), pointing at `<app>_pages.js` over HTTPS.
+- Apps: `jable`, `missav`, `hanime`.
 
 ## Critical: version bump on every code change
 
 Clients cache modules aggressively. When changing any app's code you MUST bump, together, everywhere:
 
-1. `version` in the app's entry in `docs/*-subscription.json`
-2. `MODULE_VERSION` at the top of that app's `<app>_pages.js`
-3. Every hardcoded `?v=N` literal — these are duplicated as string literals inside `$().rule()`/`lazyRule()` callbacks and in the subscription JSON's `find_rule`/`searchFind` strings (e.g. `?v=20` appears 10× in `jable_pages.js`). Grep for the old value before committing.
+1. that app's `version` field in `docs/subscription.json`
+2. `MODULE_VERSION` at the top of `docs/apps/<app>/<app>_pages.js`
+3. Every hardcoded `?v=N` literal — duplicated as string literals inside `$().rule()`/`lazyRule()` callbacks and in the subscription JSON's `find_rule`/`searchFind` strings (e.g. Jable has ~10 such literals). Grep the old value before committing; moving a file also means rewriting every full URL.
 
 A missed `?v=` means devices silently keep running the stale module.
 
@@ -31,11 +32,20 @@ A missed `?v=` means devices silently keep running the stale module.
 
 ## Gotchas
 
-- Anti-bot detection lives in each core's `isUsableHtml`: rejects short bodies and Cloudflare/captcha markers. Always pass a content `marker` option — a page-specific marker outranks generic checks (MissAV embeds a passive CF detector in otherwise-valid pages).
-- Pagination differs per site: Jable rewrites paths to `.../fypage/` plus `[firstPage=<url>]`; MissAV ignores fypage-in-URL and rebuilds a clean `page=N` query param from `MY_PAGE` — search URLs must not be embedded in the fypage token.
-- Hanime1 requires manual web verification; its "验证并同步" flow syncs cookies back into the app session.
+- Anti-bot detection lives in each core's usable-html check: rejects short bodies and Cloudflare/captcha markers. Always pass a content `marker` option — a page-specific marker outranks generic checks (MissAV embeds a passive CF detector in otherwise-valid pages; Hanime's live block page says "Attention Required", not "Just a moment").
+- Pagination differs per site: Jable rewrites paths to `.../fypage/` plus `[firstPage=<url>]`; MissAV/Hanime rebuild a clean `page=N` query param from `MY_PAGE` — search URLs must not be embedded in the fypage token.
+- Never `decodeURIComponent` raw `MY_URL` fragments without try/catch: Hiker native search injects unencoded keywords, so `%` throws URIError (use hanime_pages.js `decodeSafe` pattern).
+- Hanime menus/filters mirror the live site: genre dropdown (`genre-option[data-value]`), sort panel (`#sort-wrapper .hentai-sort-options`), year/month selects, multi-select `tags[]`. Hanime needs manual web verification ("验证并同步" appears only when a request was actually blocked).
 - Playback URLs handed to the player need headers (Referer/User-Agent) via the `{urls:[…], names:[…], headers:[…]}` JSON payload shape.
 
 ## Verifying changes
 
-Nothing runs automatically. After pushing to `main`, load/refresh the subscription JSON in the Hiker app and exercise home → list → detail → playback on-device. Site HTML drifts often; failures usually mean selectors/markers need updating against the live page.
+Run the dependency-free smoke tests:
+
+```
+node test/hanime.test.js
+```
+
+They stub the Hiker globals, execute real code paths, and assert cross-file version consistency for all three apps. Extend them when touching other apps.
+
+After pushing to `main`, refresh `docs/subscription.json` in the Hiker app and exercise home → list → detail → playback on-device. Site HTML drifts often; failures usually mean selectors/markers need updating against the live page.

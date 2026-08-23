@@ -1,13 +1,16 @@
-/* Hanime1 公共内核：请求、解析、缓存与播放地址处理。 */
+/* Hanime1 公共内核：请求、解析、缓存与播放地址处理。数据一律取自源站繁體中文界面。 */
 (function () {
     var CONFIG = {
-        version: '4',
+        version: '6',
         sources: ['https://hanime1.me'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         timeout: 12000,
         cachePrefix: 'hanime1.',
         limits: { home: 12, history: 100 }
     };
+    /* 与源站导航/排序面板一致的兜底值；页面可解析时以解析结果为准 */
+    var FALLBACK_GENRES = ['全部', '裏番', '泡麵番', 'Motion Anime', '3DCG', '2.5D', '2D動畫', 'AI生成', 'MMD', 'Cosplay'];
+    var FALLBACK_SORTS = ['本日排行', '最新內容', '最新上傳', '觀看次數'];
 
     function now() { return new Date().getTime(); }
     function text(value) {
@@ -77,7 +80,7 @@
         for (var i = 0; i < CONFIG.sources.length; i++) {
             var target = replaceHost(url, CONFIG.sources[i]);
             try {
-                var headers = { 'User-Agent': CONFIG.userAgent, Referer: CONFIG.sources[i] + '/' }, cookie = verifiedCookie();
+                var headers = { 'User-Agent': CONFIG.userAgent, Referer: CONFIG.sources[i] + '/', 'Accept-Language': 'zh-TW,zh-CN;q=0.9,zh;q=0.8' }, cookie = verifiedCookie();
                 if (cookie) headers.Cookie = cookie;
                 var raw = fetchPC(target, { headers: headers, timeout: options.timeout || CONFIG.timeout, withStatusCode: true, withHeaders: true });
                 var page = response(raw), html = page.body || '', status = Number(page.statusCode || 0);
@@ -122,7 +125,7 @@
     function cardMeta(block) {
         var clean = text(block), duration = (/(?:^|\s)(\d{1,2}:\d{2}(?::\d{2})?)(?:\s|$)/.exec(clean) || [])[1] || '';
         var like = (/(\d{1,3}%)/.exec(clean) || [])[1] || '';
-        var views = (/(\d[\d,.]*\s*[萬万]?(?:次觀看|次观看|views?))/.exec(clean) || [])[1] || '';
+        var views = (/(\d[\d,.]*\s*[萬万]?(?:次觀看|次观看|views?|\d*次))/.exec(clean) || [])[1] || '';
         var date = (/(\d+\s*(?:分鐘|分钟|小時|小时|天|週|周|個月|个月|年前))/.exec(clean) || [])[1] || '';
         return [duration, like, views, date].filter(function (value) { return value; }).join(' · ');
     }
@@ -139,13 +142,107 @@
         }
         return result;
     }
+    /* 顶部主导航：类型来自站点的 genre 下拉（genre-option），外加「新番預告」入口 */
     function parseNav(html, baseUrl) {
-        var names = { '裏番': 1, '泡麵番': 1, 'Motion Anime': 1, '3DCG': 1, '2.5D': 1, '2D動畫': 1, 'AI生成': 1, 'MMD': 1, 'Cosplay': 1, '新番預告': 1 }, anchors = String(html || '').match(/<a\b[^>]*href\s*=\s*["\'][^"\']+["\'][^>]*>[\s\S]*?<\/a>/ig) || [], result = [], seen = {};
-        for (var i = 0; i < anchors.length; i++) {
-            var title = text(anchors[i]), url = absolute(attr(anchors[i], 'href'), baseUrl);
-            if (names[title] && url && !seen[url]) { seen[url] = true; result.push({ title: title, url: url }); }
+        var source = String(html || ''), result = [], seen = {};
+        collectGenres(source).forEach(function (value) {
+            if (value === '全部') return;
+            seen[value] = true;
+            result.push({ title: value, url: absolute('/search?genre=' + encodeURIComponent(value), baseUrl) });
+        });
+        if (!result.length) {
+            FALLBACK_GENRES.slice(1).forEach(function (value) {
+                seen[value] = true;
+                result.push({ title: value, url: absolute('/search?genre=' + encodeURIComponent(value), baseUrl) });
+            });
+        }
+        var previewRe = /<a\b[^>]*href\s*=\s*["']([^"']*\/previews\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/ig, m2;
+        while ((m2 = previewRe.exec(source))) {
+            if (text(m2[2]).indexOf('新番預告') < 0) continue;
+            var url = absolute(m2[1], baseUrl);
+            if (!seen[url]) { seen[url] = true; result.push({ title: '新番預告', url: url }); }
+            break;
         }
         return result;
+    }
+    /* 站点 genre 下拉：仅取带 data-value 的条目（无 data-value 的是「新番預告/H漫畫」等普通导航） */
+    function collectGenres(source) {
+        var values = [], re = /<div\b[^>]*class\s*=\s*["'][^"']*genre-option[^"']*["'][^>]*>([^<]*)/ig, m;
+        while ((m = re.exec(source))) {
+            var value = attr(m[0], 'data-value');
+            if (!value || values.indexOf(value) >= 0) continue;
+            values.push(value);
+        }
+        return values;
+    }
+    /* 类型筛选（含「全部」），与站点 genre 下拉一致 */
+    function parseGenres(html) {
+        var values = collectGenres(String(html || ''));
+        return values.length ? values : FALLBACK_GENRES.slice(0);
+    }
+    /* 排序选项：取自站点 #sort-wrapper 面板 */
+    function parseSorts(html) {
+        var source = String(html || '');
+        var panel = /<div[^>]*id=["']sort-wrapper["'][^>]*>[\s\S]*?<\/form>/i.exec(source);
+        var scope = panel ? panel[0] : source;
+        var re = /class\s*=\s*["'][^"']*hentai-sort-options[^"']*["'][^>]*>([^<]+)</ig, options = [], seen = {}, m;
+        while ((m = re.exec(scope))) {
+            var value = text(m[1]);
+            if (!value || seen[value]) continue;
+            seen[value] = true; options.push(value);
+        }
+        return options.length ? options : FALLBACK_SORTS.slice(0);
+    }
+    function parseSelectOptions(html, name) {
+        var select = new RegExp('<select[^>]*name\\s*=\\s*["\']' + name + '["\'][^>]*>[\\s\\S]*?</select>', 'i').exec(String(html || ''));
+        if (!select) return [];
+        var re = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([^<]*)</ig, options = [], m;
+        while ((m = re.exec(select[0]))) if (m[1] !== '') options.push({ value: m[1], title: text(m[2]) });
+        return options;
+    }
+    function parseYears(html) {
+        var parsed = parseSelectOptions(html, 'year');
+        if (parsed.length) return parsed;
+        var latest = new Date().getFullYear(), options = [];
+        for (var y = latest; y >= 2008; y--) options.push({ value: String(y), title: y + '年' });
+        return options;
+    }
+    function parseMonths(html) {
+        var parsed = parseSelectOptions(html, 'month');
+        if (parsed.length) return parsed;
+        var options = [];
+        for (var mth = 1; mth <= 12; mth++) options.push({ value: String(mth), title: mth + '月' });
+        return options;
+    }
+    /* 標籤多选：与站点 tags[] 复选框一致 */
+    function parseTagOptions(html) {
+        var source = String(html || ''), values = [], seen = {};
+        var re = /<input[^>]*name\s*=\s*["']tags(?:\[\]|%5B%5D)["'][^>]*>/ig, m;
+        while ((m = re.exec(source))) {
+            var value = attr(m[0], 'value');
+            if (!value || seen[value]) continue;
+            seen[value] = true; values.push(value);
+        }
+        return values;
+    }
+    /* 首页横向板块：解析每个「查看更多」标题锚点及其卡片区间，保持与源站首页一致 */
+    function parseSections(html, baseUrl) {
+        var source = String(html || ''), anchors = [], re = /<a\b[^>]*href\s*=\s*["']([^"']*\/search\?[^"']*(?:sort|genre)=[^"']*)["'][^>]*>\s*<h3[^>]*>([\s\S]*?)<\/h3>/ig, m;
+        while ((m = re.exec(source))) {
+            var title = text(m[2]).replace(/查看更多|arrow_\w+|查看|更多/g, '').trim();
+            if (!title) continue;
+            anchors.push({ title: title, url: absolute(m[1], baseUrl), index: m.index, length: m[0].length });
+        }
+        var sections = [], seen = {};
+        for (var i = 0; i < anchors.length; i++) {
+            var key = anchors[i].title;
+            if (seen[key]) continue;
+            seen[key] = true;
+            var start = anchors[i].index + anchors[i].length;
+            var end = i + 1 < anchors.length ? anchors[i + 1].index : Math.min(source.length, start + 60000);
+            sections.push({ title: anchors[i].title, url: anchors[i].url, html: source.slice(start, end) });
+        }
+        return sections;
     }
     function meta(html, name) {
         var tags = String(html || '').match(/<meta\b[^>]*>/ig) || [];
@@ -194,7 +291,12 @@
     }
     function playerHeaders(page) { var headers = { Referer: page.url, Origin: origin(page.url), 'User-Agent': CONFIG.userAgent }; if (page.cookie) headers.Cookie = page.cookie; return headers; }
 
-    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, parseCards: parseCards, parseNav: parseNav, parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite, addHistory: addHistory, verifiedCookie: verifiedCookie };
+    var exported = {
+        config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached,
+        parseCards: parseCards, parseNav: parseNav, parseGenres: parseGenres, parseSorts: parseSorts,
+        parseYears: parseYears, parseMonths: parseMonths, parseTagOptions: parseTagOptions, parseSections: parseSections,
+        parseDetail: parseDetail, playerHeaders: playerHeaders, readList: readList, toggleFavorite: toggleFavorite, addHistory: addHistory, verifiedCookie: verifiedCookie
+    };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();
