@@ -1,14 +1,15 @@
 /* Hanime1 页面层。JSON 入口只加载本模块。 */
 (function () {
-    var MODULE_VERSION = '3';
+    var MODULE_VERSION = '4';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
     function remote(url, fallback) { try { return $.require(url); } catch (ignore) { return $.require(fallback); } }
     function core() { return remote(PUBLISH_BASE + 'hanime_core.js?v=' + MODULE_VERSION, CORE_PATH); }
+    function decodeSafe(value) { try { return decodeURIComponent(value); } catch (ignore) { return value; } }
     function addQuery(url, values) {
         var split = String(url || '').split('?'), path = split.shift(), source = split.join('?').split('&'), map = {}, output = [];
-        for (var i = 0; i < source.length; i++) if (source[i]) { var pair = source[i].split('='); map[decodeURIComponent(pair[0])] = decodeURIComponent(pair.slice(1).join('=')); }
+        for (var i = 0; i < source.length; i++) if (source[i]) { var pair = source[i].split('='); /* Hiker 原生搜索会把未编码的关键词塞进 MY_URL，% 等字符会让 decodeURIComponent 直接抛 URIError */ map[decodeSafe(pair[0])] = pair.length > 1 ? decodeSafe(pair.slice(1).join('=')) : ''; }
         for (var key in values) if (values.hasOwnProperty(key)) { if (values[key] !== '' && values[key] !== null && typeof values[key] !== 'undefined') map[key] = values[key]; else delete map[key]; }
         for (var name in map) if (map.hasOwnProperty(name)) output.push(encodeURIComponent(name) + '=' + encodeURIComponent(map[name]));
         return path + (output.length ? '?' + output.join('&') : '');
@@ -17,7 +18,12 @@
     function pagedSource(url) { return addQuery(url, { page: 'fypage' }) + '[firstPage=' + url + ']'; }
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
-            var pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=3');
+            var pages;
+            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=4'); } catch (ignore) {}
+            if (!pages || typeof pages[payload.method] !== 'function') {
+                setResult([{ title: 'Hanime1 模块加载失败', desc: '请检查网络后重试；若持续失败，请重新订阅更新。method=' + payload.method, col_type: 'text_center_1' }]);
+                return;
+            }
             if (payload.method === 'renderList') payload.params.page = Number(MY_PAGE || 1);
             pages[payload.method](payload.params);
         }, { method: method, params: params || {} });
@@ -27,8 +33,8 @@
     function routeVerification() { return emptyRule('renderVerification', {}); }
     function routeSearch(keyword, sort) { return routeList(addQuery(core().config.sources[0] + '/search', { query: keyword, sort: sort || '最新上市' }), '搜索：' + keyword); }
     function card(item) { return { title: item.title, pic_url: item.image || '', desc: item.remark || '点击查看详情', url: routeDetail(item), col_type: 'movie_2' }; }
-    function failure(error, url) {
-        return [{ title: error && error.message || '页面加载失败', desc: '请使用“验证并同步”完成站点验证，再返回刷新。', col_type: 'text_center_1' }, { title: '验证并同步', url: routeVerification(), col_type: 'text_center_1' }, { title: '在网页打开', url: 'web://' + url, col_type: 'text_center_1' }];
+    function failure(error, url, retryParams) {
+        return [{ title: error && error.message || '页面加载失败', desc: '请使用“验证并同步”完成站点验证，再返回刷新。', col_type: 'text_center_1' }, { title: '重试', url: emptyRule(retryParams && retryParams.method || 'renderList', retryParams && retryParams.params || { url: url, title: '重试' }), col_type: 'text_center_1' }, { title: '验证并同步', url: routeVerification(), col_type: 'text_center_1' }, { title: '在网页打开', url: 'web://' + url, col_type: 'text_center_1' }];
     }
     function section(result, title, items, more) {
         if (!items.length) return;
@@ -38,8 +44,8 @@
     }
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
-        if (!page.ok) { setHomeResult(failure(page.error, url)); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=3').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        if (!page.ok) { setHomeResult(failure(page.error, url, { method: 'renderHome', params: {} })); return; }
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/hanime_pages.js?v=4').routeSearch(input,'最新上市');})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
         result.push({ title: '验证并同步', desc: c.verifiedCookie() ? '已检测到本次运行的验证状态；需要时可重新验证。' : '首次使用或显示不可用时，请先在此完成网页验证。', url: routeVerification(), col_type: 'scroll_button' });
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
@@ -52,7 +58,7 @@
     }
     function renderList(params) {
         params = params || {}; var c = core(), requested = pageUrl(params.url, params.page || 1), page = c.fetchCached(requested, { marker: '/watch' }, 180);
-        if (!page.ok) { setResult(failure(page.error, requested)); return; }
+        if (!page.ok) { setResult(failure(page.error, requested, { method: 'renderList', params: params })); return; }
         try { setPageTitle(params.title || '影片列表'); } catch (ignore) {}
         var result = [], items = c.parseCards(page.html, page.url);
         if (Number(params.page || 1) === 1) result.push({ title: params.title || '影片列表', col_type: 'long_text', extra: { textSize: 18, lineVisible: false } });
@@ -62,7 +68,7 @@
     }
     function renderDetail(item) {
         item = item || {}; var c = core(), page = c.fetchCached(item.url, { marker: 'og:title' }, 300);
-        if (!page.ok) { setResult(failure(page.error, item.url)); return; }
+        if (!page.ok) { setResult(failure(page.error, item.url, { method: 'renderDetail', params: item })); return; }
         var detail = c.parseDetail(page); c.addHistory({ url: detail.url, title: detail.title || item.title, image: detail.image || item.image });
         try { setPageTitle(detail.title || item.title || '视频详情'); } catch (ignore) {}
         try { if (detail.image) setPagePicUrl(detail.image); } catch (ignoreImage) {}
@@ -109,6 +115,7 @@
         setResult([
             { title: '验证并同步', desc: '请在下方网页完成 Cloudflare 验证。检测到 cf_clearance 后会仅在本次海阔运行中同步给小程序请求；退出海阔后自动失效。', col_type: 'long_text', extra: { textSize: 16, lineVisible: false } },
             { title: 'Hanime1 网页验证', url: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.userAgent, referer: source, canBack: true, js: verificationScript() } },
+            { title: '若上方网页空白，点此在浏览器完成验证', url: 'web://' + source, col_type: 'text_center_1' },
             { title: '验证完成后返回并刷新', url: $('hiker://empty').lazyRule(function () { back(true); return 'toast://已返回主页，请刷新'; }), col_type: 'text_center_1' }
         ]);
     }

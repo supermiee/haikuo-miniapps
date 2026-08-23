@@ -1,7 +1,7 @@
 /* Hanime1 公共内核：请求、解析、缓存与播放地址处理。 */
 (function () {
     var CONFIG = {
-        version: '3',
+        version: '4',
         sources: ['https://hanime1.me'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
         timeout: 12000,
@@ -52,7 +52,8 @@
     }
     function usable(html, marker) {
         if (!html || html.length < 300) return false;
-        if (/just a moment|cf-chl|challenges\.cloudflare\.com|enable javascript and cookies/i.test(html)) return false;
+        /* 线上拦截页实测为 "Attention Required" WAF 页（403），并不含 "Just a moment"，需一并识别 */
+        if (/just a moment|attention required|cf-chl|challenges\.cloudflare\.com|enable javascript and cookies|error code: 10\d\d/i.test(String(html))) return false;
         return !marker || String(html).indexOf(marker) >= 0;
     }
     function replaceHost(url, host) { return String(url || '').replace(/^https?:\/\/[^/]+/i, host); }
@@ -83,7 +84,7 @@
                 if ((status === 0 || status < 400) && usable(html, options.marker)) {
                     return { ok: true, url: target, html: html, cookie: responseCookie(page.headers), status: status || 200 };
                 }
-                failures.push({ source: CONFIG.sources[i], status: status, reason: /cloudflare|just a moment/i.test(html) ? 'Cloudflare verification' : 'unexpected page structure' });
+                failures.push({ source: CONFIG.sources[i], status: status, reason: /cloudflare|just a moment|attention required|cf-chl/i.test(html) || status === 403 ? 'Cloudflare verification' : 'unexpected page structure' });
             } catch (error) { failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) }); }
         }
         /* WebView executes the public page's JavaScript. It is a fallback for a verified user session, not a challenge bypass. */
