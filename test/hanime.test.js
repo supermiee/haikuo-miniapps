@@ -284,9 +284,15 @@ test('验证页使用移动端 UA 并提供手动导入', function () {
     pages.renderVerification();
     var webviewCard = lastResult.filter(function (c) { return c.col_type === 'x5_webview_single'; })[0];
     assert.ok(webviewCard, '缺内嵌网页卡片');
+    /* 回归：v7 曾丢失 url 字段导致卡片无法打开 */
+    assert.strictEqual(webviewCard.url, core.config.sources[0] + '/', '内嵌网页卡片缺 url 字段，将无法点击');
+    assert.ok(webviewCard.title && webviewCard.title !== webviewCard.url, '标题应为可读文案而非裸链接');
     assert.strictEqual(webviewCard.extra.ua, core.config.mobileUa, '内嵌网页未使用移动端 UA');
     assert.ok(webviewCard.extra.ua.indexOf('Android') > 0 && webviewCard.extra.ua.indexOf('Windows') < 0, 'UA 指纹不是移动端');
     assert.ok(/cf_clearance/.test(webviewCard.extra.js) && /navigator\.userAgent/.test(webviewCard.extra.js), '注入脚本应捕获 cf_clearance 与真实 UA');
+    var t = titles(lastResult);
+    assert.ok(t.join('|').indexOf('返回并刷新') >= 0, '缺返回刷新引导');
+    assert.ok(!/在浏览器完成验证/.test(titles(lastResult).join('|')), '不应再引导去外部浏览器验证（凭证不可转移）');
     var inputCard = lastResult.filter(function (c) { return c.col_type === 'input'; })[0];
     assert.ok(inputCard && /\.importCookie\(input\)/.test(inputCard.url), '缺手动导入输入框');
 });
