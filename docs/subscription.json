@@ -2,13 +2,13 @@
   {
     "title": "Jable",
     "author": "OpenAI",
-    "version": 21,
+    "version": 22,
     "group": "开发测试",
     "type": "video",
     "url": "https://jable.tv/latest-updates/",
     "search_url": "https://jable.tv/search/?q=**",
-    "find_rule": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/apps/jable/jable_pages.js?v=21');pages.renderHome();",
-    "searchFind": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/apps/jable/jable_pages.js?v=21');pages.renderList({url:MY_URL,title:'搜索'});",
+    "find_rule": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/apps/jable/jable_pages.js?v=22');pages.renderHome();",
+    "searchFind": "js:var pages=requirejs('https://supermiee.github.io/haikuo-miniapps/apps/jable/jable_pages.js?v=22');pages.renderList({url:MY_URL,title:'搜索'});",
     "detail_find_rule": "",
     "preRule": "",
     "ua": "PC_UA"
@@ -16,13 +16,13 @@
   {
     "title": "MissAV",
     "author": "OpenAI",
-    "version": 20,
+    "version": 21,
     "group": "开发测试",
     "type": "video",
     "url": "https://missav.live/cn",
     "search_url": "https://missav.live/cn/search/**",
-    "find_rule": "js:var pages=$.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=20');pages.renderHome();",
-    "searchFind": "js:var pages=$.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=20');pages.renderList({url:MY_URL,title:'搜索',options:{search:true,keyword:''}});",
+    "find_rule": "js:var pages=$.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=21');pages.renderHome();",
+    "searchFind": "js:var pages=$.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=21');pages.renderList({url:MY_URL,title:'搜索',options:{search:true,keyword:''}});",
     "detail_find_rule": "",
     "preRule": "",
     "ua": "PC_UA"

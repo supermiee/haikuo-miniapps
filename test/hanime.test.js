@@ -120,6 +120,12 @@ global.fetchPC = function (url) {
 
 var core = freshRequire(CORE_PATH);
 var pages = freshRequire(PAGES_PATH);
+/* 其余两个应用同样要求可加载（验证机制移植后的回归底线） */
+function appPath(app, file) { return path.join(ROOT, 'docs', 'apps', app, file); }
+var jableCore = freshRequire(appPath('jable', 'jable_core.js'));
+var jablePages = freshRequire(appPath('jable', 'jable_pages.js'));
+var missavCore = freshRequire(appPath('missav', 'missav_core.js'));
+var missavPages = freshRequire(appPath('missav', 'missav_pages.js'));
 var dollar = function (u) {
     return {
         rule: function (cb, params) { return JSON.stringify({ method: params && params.method, inner: params && params.params }); },
@@ -127,7 +133,12 @@ var dollar = function (u) {
     };
 };
 dollar.require = function (p) {
-    return String(p).indexOf('hanime_core') >= 0 ? core : pages;
+    var s = String(p);
+    if (s.indexOf('jable_core') >= 0) return jableCore;
+    if (s.indexOf('jable_pages') >= 0) return jablePages;
+    if (s.indexOf('missav_core') >= 0) return missavCore;
+    if (s.indexOf('missav_pages') >= 0) return missavPages;
+    return s.indexOf('hanime_core') >= 0 ? core : pages;
 };
 dollar.toString = function (fn) { return '(' + fn.toString() + ')'; };
 global.$ = dollar;
@@ -447,6 +458,26 @@ test('注入脚本合并完整 cookie 并整串保存', function () {
     assert.ok(/mergeCookies/.test(js), '缺双路合并逻辑');
     assert.ok(/document\.cookie/.test(js) && /getCookie\(String\(location\.href/.test(js), '双通道缺失');
     assert.ok(/cookie: merged/.test(js), '应保存完整 cookie 串而非仅 cf_clearance');
+});
+
+test('jable/missav 可加载且具备验证入口', function () {
+    ['renderHome', 'renderList', 'renderVerification'].forEach(function (k) {
+        assert.strictEqual(typeof jablePages[k], 'function', 'jable 缺导出 ' + k);
+        assert.strictEqual(typeof missavPages[k], 'function', 'missav 缺导出 ' + k);
+    });
+    assert.ok(jableCore.config.mobileUa && jableCore.clearPageCache, 'jable core 缺 WebView 机制');
+    assert.ok(missavCore.config.mobileUa && missavCore.clearPageCache, 'missav core 缺 WebView 机制');
+    store = {};
+    jablePages.renderVerification();
+    var jw = lastResult.filter(function (c) { return c.col_type === 'x5_webview_single'; })[0];
+    assert.ok(jw && jw.url && jw.extra.ua === jableCore.config.mobileUa, 'jable 验证页结构不完整');
+    store = {};
+    missavPages.renderVerification();
+    var mw = lastResult.filter(function (c) { return c.col_type === 'x5_webview_single'; })[0];
+    assert.ok(mw && mw.url && mw.extra.ua === missavCore.config.mobileUa, 'missav 验证页结构不完整');
+    var step2 = JSON.parse(lastResult.filter(function (c) { return /第二步/.test(c.title); })[0].url).lazy;
+    assert.ok(/putVar\('missav\.webviewMode', '1'\)/.test(step2), 'missav 第二步未置位标志');
+    store = {};
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

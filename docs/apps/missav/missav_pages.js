@@ -1,6 +1,6 @@
 /* MissAV 完整版页面层。优先使用订阅模块，本地文件可作为离线后备。 */
 (function () {
-    var MODULE_VERSION = '20';
+    var MODULE_VERSION = '21';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/missav/missav_core.js';
     var PAGES_PATH = 'hiker://files/rules/missav/missav_pages.js';
@@ -19,7 +19,7 @@
                 var baseUrl = String(args.url || '').replace(/([?&])page=[^&]*/i, '').replace('?&', '?').replace(/&&/g, '&').replace(/[?&]$/, '');
                 args.url = pageNumber > 1 ? baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 'page=' + pageNumber : baseUrl;
             }
-            var module = $.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=20');
+            var module = $.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=21');
             if (!module || typeof module[payload.method] !== 'function') throw new Error('MissAV 页面模块加载失败：' + payload.method);
             module[payload.method](args);
         }, { method: method, params: params || {}, paged: !!source });
@@ -43,12 +43,15 @@
         var url = searchUrl(keyword, options);
         return emptyRule('renderList', { url: url, title: '搜索：' + keyword, options: { search: true, keyword: keyword, filter: options && options.filters || '', sort: options && options.sort || '' } }, pagedSource(url));
     }
+    function routeVerification() { return emptyRule('renderVerification', {}); }
     function failure(error, url) {
-        return [
-            { title: error && error.message || '页面加载失败', desc: '可重试；若站点要求验证，请先打开原网页完成验证。', col_type: 'text_center_1' },
-            { title: '重试', url: emptyRule('renderList', { url: url, title: '重试', options: {} }), col_type: 'text_center_1' },
-            { title: '打开原网页并人工验证', url: 'web://' + url, col_type: 'text_center_1' }
+        var cards = [
+            { title: error && error.message || '页面加载失败', desc: '可重试；若提示要求人机验证，请使用「验证并同步」。', col_type: 'text_center_1' },
+            { title: '重试', url: emptyRule('renderList', { url: url, title: '重试', options: {} }), col_type: 'text_center_1' }
         ];
+        if (error && /验证/.test(error.message || '')) cards.push({ title: '验证并同步', url: routeVerification(), col_type: 'text_center_1' });
+        cards.push({ title: '打开原网页', url: 'web://' + url, col_type: 'text_center_1' });
+        return cards;
     }
     function card(item) {
         return { title: item.title, img: item.image || '', desc: [item.duration, item.badge].filter(function (v) { return v; }).join(' · '), url: routeDetail(item), col_type: 'movie_2' };
@@ -67,7 +70,7 @@
         result.push({
             title: '搜索 MissAV',
             desc: '输入番号、标题或女优',
-            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=20').routeSearch(input,{}) : 'toast://请输入关键词'",
+            url: "input ? $.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_pages.js?v=21').routeSearch(input,{}) : 'toast://请输入关键词'",
             col_type: 'input',
             extra: { defaultValue: '' }
         });
@@ -161,6 +164,21 @@
         setResult(result);
     }
     function toggleSaved(item) { core().toggleFavorite(item); refreshPage(false); }
+    function renderVerification() {
+        var c = core(), source = c.config.source + '/' + c.config.locale;
+        try { setPageTitle('验证并同步'); } catch (ignore) {}
+        setResult([
+            { title: '第一步：完成人机验证', desc: '下方网页打开后，勾选 Cloudflare 验证即可。通过后按第二步返回——小程序会自动改用与该网页同源的通道加载数据，无需手动转移任何凭证。', col_type: 'long_text', extra: { textSize: 16, lineVisible: false } },
+            { title: '打开验证网页', url: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.mobileUa, referer: source, canBack: true } },
+            { title: '第二步：验证成功后，点此返回并刷新', url: $('hiker://empty').lazyRule(function () {
+                try { putVar('missav.webviewMode', '1'); } catch (ignoreFlag) {}
+                try { $.require('https://supermiee.github.io/haikuo-miniapps/apps/missav/missav_core.js?v=21').clearPageCache(); } catch (ignoreClear) {}
+                back(true);
+                return 'toast://已记录验证状态，请刷新';
+            }), col_type: 'text_center_1' },
+            { title: '常见问题', desc: '· 网页反复要求验证：刷新网页再试一次。\n· 在外部浏览器（Chrome 等）通过的验证对本小程序无效，请务必在内嵌网页完成。', col_type: 'long_text', extra: { textSize: 14, lineVisible: false } }
+        ]);
+    }
     function renderPlaySettings() {
         var c = core(), selected = c.getPlayQuality(), options = [['highest', '最高可用'], ['1080', '1080p'], ['720', '720p'], ['540', '540p'], ['480', '480p'], ['360', '360p']], result = [{ title: '播放设置', desc: '默认清晰度：' + (selected === 'highest' ? '最高可用' : selected + 'p') + '\n若源站不提供所选画质，将自动选择最接近的可用画质。', col_type: 'long_text', extra: { textSize: 17, lineVisible: false } }];
         try { setPageTitle('播放设置'); } catch (ignore) {}
@@ -170,7 +188,7 @@
     function setPlaybackQuality(params) { core().setPlayQuality(params && params.value); refreshPage(false); }
     function renderSaved() { var items = core().readList('favorites'), result = [{ title: '我的收藏', col_type: 'text_1' }]; for (var i = 0; i < items.length; i++) result.push(card(items[i])); if (!items.length) result.push({ title: '暂无收藏', col_type: 'text_center_1' }); setResult(result); }
     function renderHistory() { var items = core().readList('history'), result = [{ title: '观看历史', col_type: 'text_1' }]; for (var i = 0; i < items.length; i++) result.push(card(items[i])); if (!items.length) result.push({ title: '暂无历史', col_type: 'text_center_1' }); setResult(result); }
-    var exported = { renderHome: renderHome, renderList: renderList, renderGenres: renderGenres, renderActresses: renderActresses, renderDetail: renderDetail, renderPlaySettings: renderPlaySettings, setPlaybackQuality: setPlaybackQuality, renderSaved: renderSaved, renderHistory: renderHistory, toggleSaved: toggleSaved, routeSearch: routeSearch };
+    var exported = { renderHome: renderHome, renderList: renderList, renderGenres: renderGenres, renderActresses: renderActresses, renderDetail: renderDetail, renderPlaySettings: renderPlaySettings, setPlaybackQuality: setPlaybackQuality, renderSaved: renderSaved, renderHistory: renderHistory, toggleSaved: toggleSaved, routeSearch: routeSearch, renderVerification: renderVerification };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();

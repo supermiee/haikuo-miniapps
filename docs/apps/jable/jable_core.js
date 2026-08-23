@@ -7,6 +7,10 @@
         version: '1.0.15',
         sources: ['https://jable.tv', 'https://fs1.app'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
+        /* 验证用移动端 UA + WebView 通道标记（与内嵌验证页同内核同 CookieManager） */
+        mobileUa: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        webViewTimeout: 12000,
+        webviewFlagKey: 'jable.webviewMode',
         timeout: 12000,
         cachePrefix: 'jable.full.',
         languageKey: 'language',
@@ -93,12 +97,52 @@
         if (/cloudflare|just a moment|captcha|access denied/i.test(html)) return false;
         return !marker || String(html).indexOf(marker) >= 0;
     }
+    /* 硬拦截特征：命中即必须人工验证，多域名轮询只会白等 */
+    function isHardBlock(html, status) {
+        if (Number(status) === 403) return true;
+        return /just a moment|attention required|cf-chl|challenges\.cloudflare\.com|error code: 10\d\d/i.test(String(html || ''));
+    }
+    function webviewMode() {
+        try { return !!getVar(CONFIG.webviewFlagKey, ''); } catch (ignore) { return false; }
+    }
+    function requestByWebView(url, options) {
+        if (typeof fetchCodeByWebView === 'undefined') return null;
+        try {
+            var html = fetchCodeByWebView(url, {
+                headers: { 'User-Agent': CONFIG.mobileUa, Referer: originOf(url) + '/' },
+                timeout: (options && options.webViewTimeout) || CONFIG.webViewTimeout,
+                checkJs: $.toString(function () {
+                    return !!document.querySelector('.video-img-box, [href*="/videos/"], meta[property="og:title"]');
+                })
+            });
+            if (isUsableHtml(html, options && options.marker)) return { ok: true, url: url, html: html, cookie: '', status: 200, via: 'webview' };
+        } catch (error) { return { error: String(error) }; }
+        return null;
+    }
+    function originOf(url) {
+        var match = /^https?:\/\/[^/]+/i.exec(String(url || ''));
+        return match ? match[0] : CONFIG.sources[0];
+    }
+    function clearPageCache() {
+        try {
+            if (typeof listMyVarKeys === 'undefined' || typeof clearMyVar === 'undefined') return;
+            var all = listMyVarKeys() || [];
+            for (var i = 0; i < all.length; i++) if (String(all[i]).indexOf(cacheKey('page.')) === 0) clearMyVar(all[i]);
+        } catch (ignore) {}
+    }
 
     function request(url, options) {
         options = options || {};
         var target = normalizeUrl(url);
         var marker = options.marker || '';
         var failures = [];
+        var hardBlocked = false;
+        /* 已进入 WebView 模式：直接走与验证页同源的通道 */
+        if (webviewMode()) {
+            var primary = requestByWebView(target, options);
+            if (primary && primary.ok) return primary;
+            if (primary && primary.error) failures.push({ source: 'webview', status: 0, reason: primary.error });
+        }
         for (var i = 0; i < CONFIG.sources.length; i++) {
             var candidate = replaceHost(target, CONFIG.sources[i]);
             var started = now();
@@ -118,13 +162,31 @@
                     diagnostic({ event: 'request', ok: true, source: sourceName(candidate), status: status || 200, ms: now() - started, url: candidate });
                     return { ok: true, html: body, url: candidate, source: sourceName(candidate), status: status || 200 };
                 }
+                if (isHardBlock(body, status)) {
+                    /* 各域名共用同一套 CF 配置，命中即止损 */
+                    hardBlocked = true;
+                    failures.push({ source: sourceName(candidate), status: status, reason: 'Cloudflare challenge' });
+                    break;
+                }
                 failures.push({ source: sourceName(candidate), status: status, reason: 'invalid response' });
             } catch (error) {
                 failures.push({ source: sourceName(candidate), status: 0, reason: String(error) });
             }
         }
+        /* WebView 兜底：与内嵌验证网页共用内核与 CookieManager；无任何验证痕迹的硬拦除外（秒级引导） */
+        if (typeof fetchCodeByWebView !== 'undefined' && (!hardBlocked || webviewMode())) {
+            var fallback = requestByWebView(target, options);
+            if (fallback && fallback.ok) {
+                try { putVar(CONFIG.webviewFlagKey, '1'); } catch (ignoreFlag) {}
+                diagnostic({ event: 'request', ok: true, via: 'webview', url: target });
+                return fallback;
+            }
+            if (fallback && fallback.error) failures.push({ source: 'webview', status: 0, reason: fallback.error });
+        } else if (hardBlocked) {
+            failures.push({ source: 'webview', status: 0, reason: 'skipped: interactive verification required' });
+        }
         diagnostic({ event: 'request', ok: false, url: target, failures: failures });
-        return { ok: false, url: target, error: { code: 'NETWORK_OR_VERIFICATION', message: '站点不可用或需要网页验证', failures: failures } };
+        return { ok: false, url: target, hardBlocked: hardBlocked, error: { code: 'NETWORK_OR_VERIFICATION', message: hardBlocked ? '站点要求人机验证，请使用「验证并同步」' : '站点不可用或需要网页验证', failures: failures } };
     }
 
     function cacheKey(key) { return CONFIG.cachePrefix + key; }
@@ -147,7 +209,15 @@
         var cached = readCache(key, ttlSeconds || 300);
         if (cached) return cached;
         var page = request(url, options);
-        return page.ok ? writeCache(key, page) : page;
+        /* 成功长缓存；硬拦失败短缓存（约30s，按调用方 TTL 动态回溯），避免被拦期间反复烧请求 */
+        if (page.ok) return writeCache(key, page);
+        if (page.hardBlocked) writeCacheShort(key, page, ttlSeconds);
+        return page;
+    }
+    function writeCacheShort(key, value, ttlSeconds) {
+        var ttl = ttlSeconds || 300;
+        try { storage0.putMyVar(cacheKey(key), { savedAt: now() - Math.max(0, ttl - 30) * 1000, value: value }); } catch (ignore) {}
+        return value;
     }
 
     function attr(html, name) {
@@ -429,7 +499,8 @@
         addHistory: addHistory,
         addSearch: addSearch,
         diagnostic: diagnostic,
-        clearLocal: clearLocal
+        clearLocal: clearLocal,
+        clearPageCache: clearPageCache
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;

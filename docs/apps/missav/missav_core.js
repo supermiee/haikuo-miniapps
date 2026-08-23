@@ -7,6 +7,10 @@
         sources: ['https://missav.live', 'https://missav.ai', 'https://missav.ws', 'https://missav123.com', 'https://missav.fans', 'https://missav.media', 'https://missav888.com', 'https://missav01.com', 'https://thisav2.com'],
         locale: 'cn',
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
+        /* 验证用移动端 UA + WebView 通道标记（与内嵌验证页同内核同 CookieManager） */
+        mobileUa: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        webViewTimeout: 12000,
+        webviewFlagKey: 'missav.webviewMode',
         timeout: 5000,
         cachePrefix: 'missav.full.',
         limits: { home: 6, history: 200 }
@@ -63,26 +67,79 @@
             all.unshift(entry); storage0.putMyVar(cacheKey('diagnostics'), all.slice(0, 30));
         } catch (ignore) {}
     }
+    /* 硬拦截特征：命中即必须人工验证，多镜像轮询只会白等 */
+    function isHardBlock(html, status) {
+        if (Number(status) === 403) return true;
+        return /just a moment|attention required|cf-chl|challenges\.cloudflare\.com|verify you are human|error code: 10\d\d/i.test(String(html || ''));
+    }
+    function webviewMode() {
+        try { return !!getVar(CONFIG.webviewFlagKey, ''); } catch (ignore) { return false; }
+    }
+    function requestByWebView(url, options) {
+        if (typeof fetchCodeByWebView === 'undefined') return null;
+        try {
+            var html = fetchCodeByWebView(url, {
+                headers: { 'User-Agent': CONFIG.mobileUa, Referer: origin(url) + '/' },
+                timeout: (options && options.webViewTimeout) || CONFIG.webViewTimeout,
+                checkJs: $.toString(function () {
+                    return !!document.querySelector('video, [class*="thumbnail"], [class*="video"], meta[property="og:title"]');
+                })
+            });
+            if (isUsableHtml(html, options && options.marker)) return { ok: true, url: url, html: html, cookie: '', status: 200, via: 'webview' };
+        } catch (error) { return { error: String(error) }; }
+        return null;
+    }
+    function clearPageCache() {
+        try {
+            if (typeof listMyVarKeys === 'undefined' || typeof clearMyVar === 'undefined') return;
+            var all = listMyVarKeys() || [];
+            for (var i = 0; i < all.length; i++) if (String(all[i]).indexOf(cacheKey('page.')) === 0) clearMyVar(all[i]);
+        } catch (ignore) {}
+    }
     function request(url, options) {
         options = options || {};
-        var target = absolute(url, CONFIG.source), started = now(), failures = [], sources = sourceOrder();
+        var target = absolute(url, CONFIG.source), started = now(), failures = [], sources = sourceOrder(), hardBlocked = false;
+        /* 已进入 WebView 模式：直接走与验证页同源的通道 */
+        if (webviewMode()) {
+            var primary = requestByWebView(target, options);
+            if (primary && primary.ok) return primary;
+            if (primary && primary.error) failures.push({ source: 'webview', status: 0, reason: primary.error });
+        }
         for (var i = 0; i < sources.length; i++) {
             var candidate = replaceHost(target, sources[i]);
             try {
                 var raw = fetchPC(candidate, { headers: { 'User-Agent': CONFIG.userAgent, 'Referer': sources[i] + '/' }, timeout: options.timeout || CONFIG.timeout, withStatusCode: true });
                 var response = parseResponse(raw), status = Number(response && response.statusCode || 0), body = response && response.body || '';
                 if ((status === 0 || (status >= 200 && status < 400)) && isUsableHtml(body, options.marker || '')) {
-                    try { storage0.putMyVar(cacheKey('activeSource'), sources[i]); } catch (ignore) {}
+                    try { storage0.putMyVar(cacheKey('activeSource'), sources[i]); } catch (ignoreStore) {}
                     diagnostic({ event: 'request', ok: true, status: status || 200, ms: now() - started, url: candidate, source: sources[i] });
                     return { ok: true, html: body, url: candidate, status: status || 200, headers: response.headers || {}, cookie: cookieHeader(response.headers) };
+                }
+                if (isHardBlock(body, status)) {
+                    /* 各镜像共用同一套 CF 配置，命中即止损，不再轮询其余域名 */
+                    hardBlocked = true;
+                    failures.push({ source: sources[i], status: status, reason: 'Cloudflare challenge' });
+                    break;
                 }
                 failures.push({ source: sources[i], status: status, reason: 'content marker missing' });
             } catch (error) {
                 failures.push({ source: sources[i], status: 0, reason: String(error) });
             }
         }
+        /* WebView 兜底：与内嵌验证网页共用内核与 CookieManager；无任何验证痕迹的硬拦除外（秒级引导） */
+        if (typeof fetchCodeByWebView !== 'undefined' && (!hardBlocked || webviewMode())) {
+            var fallback = requestByWebView(target, options);
+            if (fallback && fallback.ok) {
+                try { putVar(CONFIG.webviewFlagKey, '1'); } catch (ignoreFlag) {}
+                diagnostic({ event: 'request', ok: true, via: 'webview', ms: now() - started, url: target });
+                return fallback;
+            }
+            if (fallback && fallback.error) failures.push({ source: 'webview', status: 0, reason: fallback.error });
+        } else if (hardBlocked) {
+            failures.push({ source: 'webview', status: 0, reason: 'skipped: interactive verification required' });
+        }
         diagnostic({ event: 'request', ok: false, ms: now() - started, url: target, failures: failures });
-        return { ok: false, url: target, error: { code: 'NO_CONTENT_RESPONSE', message: '站点未返回可解析内容（已尝试公开备用域名）', failures: failures } };
+        return { ok: false, url: target, hardBlocked: hardBlocked, error: { code: 'NO_CONTENT_RESPONSE', message: hardBlocked ? '站点要求人机验证，请使用「验证并同步」' : '站点未返回可解析内容（已尝试公开备用域名）', failures: failures } };
     }
     function readCache(key, ttl) {
         try { var item = storage0.getMyVar(cacheKey(key)); return item && now() - item.savedAt < ttl * 1000 ? item.value : null; } catch (ignore) { return null; }
@@ -91,7 +148,9 @@
         var key = 'page.' + String(url), cached = readCache(key, ttl || 300);
         if (cached) return cached;
         var page = request(url, options);
-        try { if (page.ok) storage0.putMyVar(cacheKey(key), { savedAt: now(), value: page }); } catch (ignore) {}
+        /* 成功长缓存；硬拦失败短缓存（30s），避免被拦期间反复烧请求 */
+        var storeTtl = page.ok ? (ttl || 300) : (page.hardBlocked ? 30 : 0);
+        if (storeTtl) try { storage0.putMyVar(cacheKey(key), { savedAt: now(), value: page }); } catch (ignoreCache) {}
         return page;
     }
     /* Home has three independent feeds. Fetch cache misses concurrently on the last known-good mirror,
@@ -301,7 +360,7 @@
         if (page.cookie) result.Cookie = page.cookie;
         return result;
     }
-    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, fetchManyCached: fetchManyCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseQualities: parseQualities, parseDetail: parseDetail, playerHeaders: playerHeaders, getPlayQuality: getPlayQuality, setPlayQuality: setPlayQuality, selectStream: selectStream, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList };
+    var exported = { config: CONFIG, text: text, absolute: absolute, request: request, fetchCached: fetchCached, fetchManyCached: fetchManyCached, parseCards: parseCards, parseCount: parseCount, parseGenres: parseGenres, parseActresses: parseActresses, parseQualities: parseQualities, parseDetail: parseDetail, playerHeaders: playerHeaders, getPlayQuality: getPlayQuality, setPlayQuality: setPlayQuality, selectStream: selectStream, isFavorite: isFavorite, toggleFavorite: toggleFavorite, addHistory: addHistory, readList: readList, writeList: writeList, clearPageCache: clearPageCache };
     if (typeof module !== 'undefined' && module.exports) module.exports = exported;
     if (typeof $ !== 'undefined') $.exports = exported;
 })();
