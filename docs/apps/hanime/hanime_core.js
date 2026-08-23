@@ -105,6 +105,10 @@
         if (Number(status) === 403) return true;
         return /just a moment|attention required|cf-chl|challenges\.cloudflare\.com|error code: 10\d\d/i.test(String(html || ''));
     }
+    /* 会话三种形态：
+     * 1. cookie+ua 齐全 → fetchPC 原样回放（最快）
+     * 2. 仅 cookie（桥接同步而来，UA 未知）→ 走 fetchCodeByWebView：与验证网页共用内核/UA/CookieManager，天然携带凭证
+     * 3. 无会话 → fetchPC 直连；硬拦立即给引导 */
     function requestByWebView(url, options) {
         if (typeof fetchCodeByWebView === 'undefined') return null;
         try {
@@ -122,11 +126,17 @@
     function request(url, options) {
         options = options || {};
         var failures = [], hardBlocked = false;
+        var session = verifiedSession();
+        /* UA 未知的会话直接走 WebView：凭证在应用 CookieManager 里，与验证时同源同指纹 */
+        if (session && session.cookie && !session.ua && typeof fetchCodeByWebView !== 'undefined') {
+            var viaWebview = requestByWebView(url, options);
+            if (viaWebview && viaWebview.ok) return viaWebview;
+            failures.push({ source: 'webview', status: 0, reason: viaWebview && viaWebview.error ? viaWebview.error : 'webview unusable' });
+        }
         for (var i = 0; i < CONFIG.sources.length; i++) {
             var target = replaceHost(url, CONFIG.sources[i]);
             try {
                 /* 有验证会话时必须原样回放签发时的 UA，否则 cf_clearance 因 UA 不匹配而失效 */
-                var session = verifiedSession();
                 var headers = { 'User-Agent': session && session.ua ? session.ua : CONFIG.userAgent, Referer: CONFIG.sources[i] + '/', 'Accept-Language': 'zh-TW,zh-CN;q=0.9,zh;q=0.8' };
                 if (session && session.cookie) headers.Cookie = session.cookie;
                 var raw = fetchPC(target, { headers: headers, timeout: options.timeout || CONFIG.timeout, withStatusCode: true, withHeaders: true });
@@ -138,15 +148,17 @@
                 failures.push({ source: CONFIG.sources[i], status: status, reason: isHardBlock(html, status) ? 'Cloudflare verification' : 'unexpected page structure' });
             } catch (error) { failures.push({ source: CONFIG.sources[i], status: 0, reason: String(error) }); }
         }
-        /* 硬拦截时跳过 WebView 兜底：挑战需要人工交互，等待只会拖慢识别（秒级给出引导） */
-        if (!hardBlocked) {
+        /* 无会话且硬拦 → 必须人工验证，跳过兜底秒级引导；
+         * 已有会话仍硬拦 → 凭证可能只存在于 CookieManager，给 WebView 一次机会再认输 */
+        var allowWebviewFallback = !hardBlocked || !!session;
+        if (typeof fetchCodeByWebView !== 'undefined' && allowWebviewFallback) {
             var webView = requestByWebView(url, options);
             if (webView && webView.ok) return webView;
             if (webView && webView.error) failures.push({ source: 'webview', status: 0, reason: webView.error });
-        } else {
+        } else if (hardBlocked) {
             failures.push({ source: 'webview', status: 0, reason: 'skipped: interactive verification required' });
         }
-        return { ok: false, url: url, error: { code: 'NETWORK_OR_VERIFICATION', message: hardBlocked ? '站点要求人机验证，请使用「验证并同步」' : '站点不可用或需要在网页完成验证', failures: failures } };
+        return { ok: false, url: url, hardBlocked: hardBlocked, error: { code: 'NETWORK_OR_VERIFICATION', message: hardBlocked ? '站点要求人机验证，请使用「验证并同步」' : '站点不可用或需要在网页完成验证', failures: failures } };
     }
     function cacheKey(key) { return CONFIG.cachePrefix + key; }
     function readCache(key, ttl) {
@@ -156,7 +168,9 @@
         var key = 'page.' + String(url), cached = readCache(key, ttl || 180);
         if (cached) return cached;
         var page = request(url, options);
-        if (page.ok) try { storage0.putMyVar(cacheKey(key), { savedAt: now(), value: page }); } catch (ignore) {}
+        /* 成功长缓存；硬拦失败短缓存（30s），避免被拦期间每次点击都重新烧请求 */
+        var storeTtl = page.ok ? (ttl || 180) : (page.hardBlocked ? 30 : 0);
+        if (storeTtl) try { storage0.putMyVar(cacheKey(key), { savedAt: now(), value: page }); } catch (ignore) {}
         return page;
     }
     function first(block, selectors) {

@@ -1,6 +1,6 @@
 /* Hanime1 页面层。JSON 入口只加载本模块。菜单与筛选结构与源站繁體中文界面保持一致。 */
 (function () {
-    var MODULE_VERSION = '9';
+    var MODULE_VERSION = '10';
     var PUBLISH_BASE = 'https://supermiee.github.io/haikuo-miniapps/';
     var CORE_PATH = 'hiker://files/rules/hanime1/hanime_core.js';
     var PAGES_PATH = 'hiker://files/rules/hanime1/hanime_pages.js';
@@ -51,7 +51,7 @@
     function emptyRule(method, params, source) {
         return $('hiker://empty' + (source ? '#' + source : '')).rule(function (payload) {
             var pages;
-            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=9'); } catch (ignore) {}
+            try { pages = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=10'); } catch (ignore) {}
             if (!pages || typeof pages[payload.method] !== 'function') {
                 setResult([{ title: 'Hanime1 模块加载失败', desc: '请检查网络后重试；若持续失败，请重新订阅更新。method=' + payload.method, col_type: 'text_center_1' }]);
                 return;
@@ -119,7 +119,7 @@
     function renderHome() {
         var c = core(), url = c.config.sources[0] + '/', page = c.fetchCached(url, { marker: '/watch' }, 180);
         if (!page.ok) { setHomeResult(failure(page.error, url, { method: 'renderHome', params: {} })); return; }
-        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=9').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
+        var result = [{ title: '搜索 Hanime1', desc: '输入标题或作者', url: "input ? (function(){return $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=10').routeSearch(input);})() : 'toast://请输入关键词'", col_type: 'input', extra: { defaultValue: '' } }];
         var nav = c.parseNav(page.html, page.url);
         for (var n = 0; n < nav.length; n++) result.push({ title: nav[n].title, url: routeList(nav[n].url, nav[n].title), col_type: 'scroll_button' });
         result.push({ title: '收藏', url: emptyRule('renderFavorites', {}), col_type: 'scroll_button' });
@@ -224,9 +224,26 @@
         setResult([
             { title: '第一步：完成人机验证', desc: '下方网页打开后，勾选 Cloudflare 验证即可。通过后小程序会自动记录凭证（含验证时的浏览器标识），随后按第二步返回刷新。', col_type: 'long_text', extra: { textSize: 16, lineVisible: false } },
             { title: '打开验证网页', url: source, desc: 'float&&screen-150', col_type: 'x5_webview_single', extra: { ua: c.config.mobileUa, referer: source, canBack: true, js: verificationScript() } },
-            { title: '第二步：验证成功后，点此返回并刷新', url: $('hiker://empty').lazyRule(function () { back(true); return 'toast://已返回，请刷新'; }), col_type: 'text_center_1' },
+            { title: '第二步：验证成功后，点此同步并返回', url: $('hiker://empty').lazyRule(function () {
+                /* 在规则上下文直接读取应用 CookieManager：与内嵌网页同罐，绕开跨上下文变量可见性问题 */
+                var synced = false;
+                try {
+                    var core = $.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_core.js?v=10');
+                    var jar = '';
+                    try { jar = String(fy_bridge_app.getCookie('https://hanime1.me/') || ''); } catch (ignoreBridge) {}
+                    if (jar.indexOf('cf_clearance=') >= 0) {
+                        var previous = null;
+                        try { previous = core.verifiedSession(); } catch (ignoreSession) {}
+                        /* 若注入脚本已存过 UA 配对则保留；否则存无 UA 会话，请求层自动改走 WebView 原生通道 */
+                        core.saveSession(jar, previous && previous.ua ? previous.ua : '');
+                        synced = true;
+                    }
+                } catch (ignoreSync) {}
+                back(true);
+                return 'toast://' + (synced ? '已同步验证状态，请刷新' : '未检测到凭证，请先完成内嵌网页验证');
+            }), col_type: 'text_center_1' },
             { title: '常见问题', desc: '· 网页空白或反复要求验证：点击网页右上角菜单刷新一次再试。\n· 在外部浏览器（Chrome 等）通过的验证对本小程序无效：凭证与浏览器指纹绑定，无法转移，请务必在上方的内嵌网页里完成。\n· 备用方案（需电脑）：电脑 Chrome 打开 hanime1.me 完成验证 → F12 → Application → Cookies → 复制 cf_clearance 的值，粘贴到下方输入框。', col_type: 'long_text', extra: { textSize: 14, lineVisible: false } },
-            { title: '备用：粘贴 cf_clearance', desc: '仅在内嵌网页始终无法通过时使用。粘贴后自动保存并返回刷新。', url: "$.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=9').importCookie(input)", col_type: 'input', extra: { defaultValue: '' } }
+            { title: '备用：粘贴 cf_clearance', desc: '仅在内嵌网页始终无法通过时使用。粘贴后自动保存并返回刷新。', url: "$.require('https://supermiee.github.io/haikuo-miniapps/apps/hanime/hanime_pages.js?v=10').importCookie(input)", col_type: 'input', extra: { defaultValue: '' } }
         ]);
     }
     function importCookie(value) { return core().importCookie(value); }

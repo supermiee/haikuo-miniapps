@@ -123,7 +123,7 @@ var pages = freshRequire(PAGES_PATH);
 var dollar = function (u) {
     return {
         rule: function (cb, params) { return JSON.stringify({ method: params && params.method, inner: params && params.params }); },
-        lazyRule: function (cb) { return JSON.stringify({ lazy: true }); }
+        lazyRule: function (cb) { return JSON.stringify({ lazy: String(cb) }); }
     };
 };
 dollar.require = function (p) {
@@ -293,7 +293,7 @@ test('验证页使用移动端 UA 并提供手动导入', function () {
     assert.ok(webviewCard.extra.ua.indexOf('Android') > 0 && webviewCard.extra.ua.indexOf('Windows') < 0, 'UA 指纹不是移动端');
     assert.ok(/cf_clearance/.test(webviewCard.extra.js) && /navigator\.userAgent/.test(webviewCard.extra.js), '注入脚本应捕获 cf_clearance 与真实 UA');
     var t = titles(lastResult);
-    assert.ok(t.join('|').indexOf('返回并刷新') >= 0, '缺返回刷新引导');
+    assert.ok(t.join('|').indexOf('同步并返回') >= 0, '缺第二步同步返回引导');
     assert.ok(!/在浏览器完成验证/.test(titles(lastResult).join('|')), '不应再引导去外部浏览器验证（凭证不可转移）');
     var inputCard = lastResult.filter(function (c) { return c.col_type === 'input'; })[0];
     assert.ok(inputCard && /\.importCookie\(input\)/.test(inputCard.url), '缺手动导入输入框');
@@ -369,6 +369,58 @@ test('保存会话即作废全部页面缓存', function () {
 test('超时参数收紧（快速识别挑战）', function () {
     assert.ok(core.config.timeout <= 9000, 'fetchPC 超时应 ≤9s: ' + core.config.timeout);
     assert.ok(core.config.webViewTimeout <= 15000, 'WebView 超时应 ≤15s: ' + core.config.webViewTimeout);
+});
+
+test('无 UA 会话直接走 WebView 原生通道（不经过 fetchPC）', function () {
+    store = {};
+    core.saveSession('cf_clearance=jar1', '');
+    var pc = 0, wv = 0, oldF = global.fetchPC, oldW = global.fetchCodeByWebView;
+    global.fetchPC = function () { pc++; return JSON.stringify({ body: 'x', headers: {}, statusCode: 200 }); };
+    var richPage = '<html><body>' + new Array(21).join('<a href="/watch?v=1">v</a>') + '</body></html>'; /* 须 >300 字节过可用线 */
+    global.fetchCodeByWebView = function () { wv++; return richPage; };
+    try { pages.renderList({ url: 'https://hanime1.me/', title: 'L', page: 1 }); }
+    finally { global.fetchPC = oldF; if (oldW === undefined) delete global.fetchCodeByWebView; else global.fetchCodeByWebView = oldW; }
+    assert.strictEqual(wv, 1, '应走 WebView 通道');
+    assert.strictEqual(pc, 0, '不应再经过 fetchPC（UA 未知无法回放）');
+    store = {};
+});
+
+test('有会话仍被硬拦时，给 WebView 兜底一次机会', function () {
+    store = {};
+    core.saveSession('cf_clearance=x', 'UA-A');
+    FETCH_MODE = 'block';
+    var wv = 0, oldW = global.fetchCodeByWebView;
+    global.fetchCodeByWebView = function () { wv++; return '<html>blocked</html>'; };
+    try { pages.renderList({ url: 'https://hanime1.me/', title: 'L', page: 1 }); }
+    finally { if (oldW === undefined) delete global.fetchCodeByWebView; else global.fetchCodeByWebView = oldW; FETCH_MODE = 'ok'; }
+    assert.ok(wv >= 1, '有会话硬拦时应尝试 WebView 兜底');
+    store = {};
+});
+
+test('硬拦失败短缓存：30s 内重复点击不再发请求，验证后立即失效', function () {
+    store = {}; FETCH_MODE = 'block';
+    var pc = 0, oldF = global.fetchPC;
+    global.fetchPC = function (u, o) { pc++; return oldF(u, o); };
+    try {
+        pages.renderList({ url: 'https://hanime1.me/', title: 'L', page: 1 });
+        pages.renderList({ url: 'https://hanime1.me/', title: 'L', page: 1 });
+        assert.strictEqual(pc, 1, '第二次点击命中失败短缓存，不应重复请求');
+        core.saveSession('cf_clearance=fresh', 'UA-B'); /* 验证成功 → 缓存全清 */
+        pages.renderList({ url: 'https://hanime1.me/', title: 'L', page: 1 });
+        assert.strictEqual(pc, 2, '验证后应重新发起真实请求');
+    } finally { global.fetchPC = oldF; FETCH_MODE = 'ok'; }
+    store = {};
+});
+
+test('第二步按钮在规则上下文同步桥接 cookie', function () {
+    store = {};
+    pages.renderVerification();
+    var btn = lastResult.filter(function (c) { return /同步并返回/.test(c.title); })[0];
+    assert.ok(btn, '缺第二步同步按钮');
+    var src = JSON.parse(btn.url).lazy;
+    assert.ok(/getCookie\('https:\/\/hanime1\.me\//.test(src), '未从桥接读取 cookie 罐');
+    assert.ok(/saveSession/.test(src), '未保存会话');
+    assert.ok(/hanime_core\.js\?v=10/.test(src), '回调内 require 版本字面量过期');
 });
 
 test('注入脚本合并完整 cookie 并整串保存', function () {
